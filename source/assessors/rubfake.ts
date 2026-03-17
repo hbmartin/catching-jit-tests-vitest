@@ -204,11 +204,10 @@ const falsePositiveRules: readonly RubFakeRule[] = [
     confidence: "medium",
     sources: ["execution-log"],
     evaluate(ctx: RuleContext): PatternMatch | null {
-      if (
-        snapshotMismatchPattern.test(ctx.executionLog) ||
+      const usesSnapshots =
         toMatchSnapshotPattern.test(ctx.testCode) ||
-        toMatchInlineSnapshotPattern.test(ctx.testCode)
-      ) {
+        toMatchInlineSnapshotPattern.test(ctx.testCode);
+      if (usesSnapshots && snapshotMismatchPattern.test(ctx.executionLog)) {
         return {
           score: -0.5,
           evidence:
@@ -259,6 +258,13 @@ const truePositiveRules: readonly RubFakeRule[] = [
     confidence: "medium",
     sources: ["execution-log", "diff"],
     evaluate(ctx: RuleContext): PatternMatch | null {
+      if (
+        ctx.weakCatch.behaviorChange.changeType !== "null-introduced" &&
+        ctx.weakCatch.behaviorChange.changeType !== "exception-introduced"
+      ) {
+        return null;
+      }
+
       const matched = emptyContainerPatterns.some((p) =>
         p.test(ctx.executionLog),
       );
@@ -324,8 +330,8 @@ const truePositiveRules: readonly RubFakeRule[] = [
 function evaluateRubFake(ctx: RuleContext): Assessment {
   const allRules = [...falsePositiveRules, ...truePositiveRules];
   const detectedPatterns: DetectedPattern[] = [];
-  let totalScore = 0;
-  let matchCount = 0;
+  let strongestScore = 0;
+  let strongestMagnitude = 0;
 
   for (const rule of allRules) {
     const match = rule.evaluate(ctx);
@@ -336,12 +342,16 @@ function evaluateRubFake(ctx: RuleContext): Assessment {
         confidence: rule.confidence,
         evidence: match.evidence,
       });
-      totalScore += match.score;
-      matchCount += 1;
+
+      const magnitude = Math.abs(match.score);
+      if (magnitude > strongestMagnitude) {
+        strongestMagnitude = magnitude;
+        strongestScore = match.score;
+      }
     }
   }
 
-  const score = matchCount > 0 ? totalScore / matchCount : 0;
+  const score = detectedPatterns.length > 0 ? strongestScore : 0;
 
   return {
     score,

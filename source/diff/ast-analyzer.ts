@@ -2,6 +2,48 @@ import ts from "typescript";
 
 import type { ASTAnalysis, FunctionInfo, SignatureChange } from "./types.js";
 
+function getMethodContainerName(node: ts.MethodDeclaration): string | null {
+  const { parent } = node;
+  if (ts.isClassLike(parent) && parent.name) {
+    return parent.name.text;
+  }
+
+  if (ts.isObjectLiteralExpression(parent)) {
+    const variableStatement = parent.parent?.parent;
+    if (
+      variableStatement &&
+      ts.isVariableDeclaration(variableStatement) &&
+      ts.isIdentifier(variableStatement.name)
+    ) {
+      return variableStatement.name.text;
+    }
+  }
+
+  return null;
+}
+
+function toQualifiedName(baseName: string, scope: string | null): string {
+  return scope ? `${scope}.${baseName}` : baseName;
+}
+
+function extractNodeSignature(
+  node: ts.Node,
+  sourceFile: ts.SourceFile,
+): string {
+  const text = node.getText(sourceFile).trim();
+  const braceIndex = text.indexOf("{");
+  if (braceIndex !== -1) {
+    return text.slice(0, braceIndex).trim();
+  }
+
+  const arrowIndex = text.indexOf("=>");
+  if (arrowIndex !== -1) {
+    return text.slice(0, arrowIndex + 2).trim();
+  }
+
+  return text;
+}
+
 function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
   const functions: FunctionInfo[] = [];
 
@@ -12,6 +54,7 @@ function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
       functions.push({
         name: node.name.text,
         body: node.getText(sourceFile),
+        signature: extractNodeSignature(node, sourceFile),
         startLine: start.line,
         endLine: end.line,
       });
@@ -23,9 +66,14 @@ function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
       const nameText = ts.isIdentifier(node.name)
         ? node.name.text
         : node.name.getText(sourceFile);
+      const qualifiedName = toQualifiedName(
+        nameText,
+        getMethodContainerName(node),
+      );
       functions.push({
-        name: nameText,
+        name: qualifiedName,
         body: node.getText(sourceFile),
+        signature: extractNodeSignature(node, sourceFile),
         startLine: start.line,
         endLine: end.line,
       });
@@ -46,6 +94,7 @@ function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
           functions.push({
             name: decl.name.text,
             body: node.getText(sourceFile),
+            signature: extractNodeSignature(node, sourceFile),
             startLine: start.line,
             endLine: end.line,
           });
@@ -70,6 +119,9 @@ function extractExportNames(sourceFile: ts.SourceFile): Set<string> {
     const isExported = modifiers?.some(
       (m) => m.kind === ts.SyntaxKind.ExportKeyword,
     );
+    const isDefaultExport = modifiers?.some(
+      (m) => m.kind === ts.SyntaxKind.DefaultKeyword,
+    );
 
     if (isExported) {
       if (ts.isFunctionDeclaration(node) && node.name) {
@@ -86,6 +138,10 @@ function extractExportNames(sourceFile: ts.SourceFile): Set<string> {
         exports.add(node.name.text);
       } else if (ts.isInterfaceDeclaration(node)) {
         exports.add(node.name.text);
+      }
+
+      if (isDefaultExport) {
+        exports.add("default");
       }
     }
 
@@ -167,16 +223,16 @@ function diffFunctionSignatures(
 
   for (const childFn of childFunctions) {
     const parentFn = parentMap.get(childFn.name);
-    if (parentFn && parentFn.body !== childFn.body) {
-      const oldSig = parentFn.body.split("\n")[0] ?? "";
-      const newSig = childFn.body.split("\n")[0] ?? "";
-      if (oldSig !== newSig) {
-        changes.push({
-          name: childFn.name,
-          oldSignature: oldSig,
-          newSignature: newSig,
-        });
-      }
+    if (
+      parentFn &&
+      parentFn.body !== childFn.body &&
+      parentFn.signature !== childFn.signature
+    ) {
+      changes.push({
+        name: childFn.name,
+        oldSignature: parentFn.signature,
+        newSignature: childFn.signature,
+      });
     }
   }
 

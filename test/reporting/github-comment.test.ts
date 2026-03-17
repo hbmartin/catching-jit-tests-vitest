@@ -102,4 +102,31 @@ describe("formatPRComment", () => {
     const result = formatPRComment(reports, defaultStats);
     expect(result).toContain("2 potential regressions");
   });
+
+  it("escapes report text before interpolation", () => {
+    const reports: BehaviorReport[] = [
+      {
+        headline: "<script>alert(1)</script>",
+        senseCheck: "Line 1\n<script>",
+        details: {
+          behaviorChange: {
+            summary: "unsafe",
+            parentBehavior: "<b>before</b>",
+            childBehavior: "<i>after</i>",
+            changeType: "other",
+          },
+          verdict: "uncertain",
+          assessorRationales: ["<unsafe> rationale"],
+          testCode: "expect(true).toBe(true);",
+          dismissalEstimate: "~5 minutes",
+        },
+      },
+    ];
+
+    const result = formatPRComment(reports, defaultStats);
+    expect(result).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(result).toContain("> &lt;script&gt;");
+    expect(result).toContain("&lt;b&gt;before&lt;/b&gt;");
+    expect(result).toContain("&lt;unsafe&gt; rationale");
+  });
 });

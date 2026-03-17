@@ -1,9 +1,25 @@
+import ts from "typescript";
 import { generateMutantPrompt } from "../prompts/templates.js";
 import type { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 import { extractCodeBlock } from "./test-synthesizer.js";
 
 import type { InferredRisk, MutantCandidate } from "./types.js";
+
+function normalizeTargetSymbol(targetSymbol: string): string {
+  const parts = targetSymbol.split(".");
+  return parts.at(-1) ?? targetSymbol;
+}
+
+function looksLikeSourceCode(source: string): boolean {
+  const parsed = ts.createSourceFile(
+    "mutant.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+  );
+  return parsed.statements.length > 0;
+}
 
 async function generateRiskMutant(
   risk: InferredRisk,
@@ -29,7 +45,13 @@ async function generateRiskMutant(
 
     const mutantCode = extractCodeBlock(response.content);
 
-    if (mutantCode.length === 0 || mutantCode === parentSource) {
+    const targetSymbol = normalizeTargetSymbol(risk.targetSymbol);
+    if (
+      mutantCode.length === 0 ||
+      mutantCode === parentSource ||
+      !looksLikeSourceCode(mutantCode) ||
+      !mutantCode.includes(targetSymbol)
+    ) {
       logger.warn(`No meaningful mutant generated for risk ${risk.id}`);
       return null;
     }

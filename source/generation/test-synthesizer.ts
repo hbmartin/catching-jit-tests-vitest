@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { killMutantPrompt } from "../prompts/templates.js";
 import { generatedTestSchema } from "../runtime-schemas.js";
@@ -9,23 +10,53 @@ import type { GeneratedTest, TestSynthesisRequest } from "./types.js";
 function computeInlineDiff(parent: string, child: string): string {
   const parentLines = parent.split("\n");
   const childLines = child.split("\n");
-  const diffLines: string[] = [];
+  const lcs: number[][] = Array.from({ length: parentLines.length + 1 }, () =>
+    Array.from({ length: childLines.length + 1 }, () => 0),
+  );
 
-  const maxLen = Math.max(parentLines.length, childLines.length);
-  for (let i = 0; i < maxLen; i += 1) {
-    const pLine = parentLines[i];
-    const cLine = childLines[i];
+  for (let i = parentLines.length - 1; i >= 0; i -= 1) {
+    for (let j = childLines.length - 1; j >= 0; j -= 1) {
+      const row = lcs[i] ?? [];
 
-    if (pLine === undefined) {
-      diffLines.push(`+${cLine}`);
-    } else if (cLine === undefined) {
-      diffLines.push(`-${pLine}`);
-    } else if (pLine === cLine) {
-      diffLines.push(` ${pLine}`);
-    } else {
-      diffLines.push(`-${pLine}`);
-      diffLines.push(`+${cLine}`);
+      if (parentLines[i] === childLines[j]) {
+        row[j] = (lcs[i + 1]?.[j + 1] ?? 0) + 1;
+      } else {
+        row[j] = Math.max(lcs[i + 1]?.[j] ?? 0, row[j + 1] ?? 0);
+      }
+
+      lcs[i] = row;
     }
+  }
+
+  const diffLines: string[] = [];
+  let i = 0;
+  let j = 0;
+
+  while (i < parentLines.length && j < childLines.length) {
+    const parentLine = parentLines[i];
+    const childLine = childLines[j];
+
+    if (parentLine === childLine) {
+      diffLines.push(` ${parentLine}`);
+      i += 1;
+      j += 1;
+    } else if ((lcs[i + 1]?.[j] ?? 0) >= (lcs[i]?.[j + 1] ?? 0)) {
+      diffLines.push(`-${parentLine}`);
+      i += 1;
+    } else {
+      diffLines.push(`+${childLine}`);
+      j += 1;
+    }
+  }
+
+  while (i < parentLines.length) {
+    diffLines.push(`-${parentLines[i]}`);
+    i += 1;
+  }
+
+  while (j < childLines.length) {
+    diffLines.push(`+${childLines[j]}`);
+    j += 1;
   }
 
   return diffLines.join("\n");
@@ -48,13 +79,18 @@ function extractCodeBlock(response: string): string {
   return response.trim();
 }
 
-function deriveTestFilePath(targetPath: string): string {
+function deriveTestFilePath(targetPath: string, candidateKey: string): string {
   const { dir, name } = path.parse(targetPath);
-  return path.join(dir, `${name}.jittest.test.ts`);
+  return path.join(dir, `${name}.${candidateKey}.jittest.test.ts`);
 }
 
 function deriveImportPath(targetPath: string): string {
-  return `./${path.basename(targetPath, ".ts")}.js`;
+  const extension = path.extname(targetPath);
+  return `./${path.basename(targetPath, extension)}.js`;
+}
+
+function createCandidateKey(rawKey: string): string {
+  return createHash("sha1").update(rawKey).digest("hex").slice(0, 8);
 }
 
 async function synthesizeTest(
@@ -103,10 +139,13 @@ async function synthesizeTest(
 
     return generatedTestSchema.parse({
       code,
-      targetSymbol: "",
-      testFilePath: deriveTestFilePath(request.targetPath),
+      targetSymbol: request.targetSymbol,
+      testFilePath: deriveTestFilePath(
+        request.targetPath,
+        createCandidateKey(request.candidateKey),
+      ),
       behaviorDescription,
-      workflow: "dodgy-diff",
+      workflow: request.workflow,
       generatorConfidence: 0.7,
     });
   } catch (err) {
@@ -127,7 +166,7 @@ async function synthesizeMultipleTests(
     const test = await synthesizeTest(
       {
         ...request,
-        targetBehavior: request.targetBehavior,
+        candidateKey: `${request.candidateKey}:${String(i)}`,
       },
       llm,
     );

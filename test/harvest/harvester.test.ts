@@ -122,4 +122,53 @@ describe("describeBehaviorChange", () => {
       "Test behavior changed between parent and child",
     );
   });
+
+  it("detects nullish runtime regressions from the failure message", () => {
+    const result: DualExecutionResult = {
+      ...makeDualResult("passed", "failed"),
+      childOutcome: {
+        testFile: "test/foo.test.ts",
+        testName: "foo test",
+        status: "failed",
+        failureMessage:
+          "TypeError: Cannot read properties of undefined (reading 'name')",
+        duration: 100,
+        failureAnalysis: {
+          assertionType: "other",
+          expected: null,
+          actual: null,
+          stackTrace: "",
+          isRuntimeError: true,
+          errorClass: "TypeError",
+        },
+      },
+    };
+
+    const change = describeBehaviorChange(result);
+    expect(change.changeType).toBe("null-introduced");
+  });
+
+  it("classifies typed runtime exceptions as introduced exceptions", () => {
+    const result: DualExecutionResult = {
+      ...makeDualResult("passed", "failed"),
+      childOutcome: {
+        testFile: "test/foo.test.ts",
+        testName: "foo test",
+        status: "failed",
+        failureMessage: "ReferenceError: missingValue is not defined",
+        duration: 100,
+        failureAnalysis: {
+          assertionType: "other",
+          expected: null,
+          actual: null,
+          stackTrace: "",
+          isRuntimeError: true,
+          errorClass: "ReferenceError",
+        },
+      },
+    };
+
+    const change = describeBehaviorChange(result);
+    expect(change.changeType).toBe("exception-introduced");
+  });
 });

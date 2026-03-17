@@ -39,6 +39,23 @@ describe("runCli", () => {
     expect(runCatchCommandMock).toHaveBeenCalled();
   });
 
+  it("passes PR metadata through catch options", async () => {
+    await runCli([
+      "catch",
+      "--pr-title",
+      "Fix auth bug",
+      "--pr-body",
+      "Preserve login behavior",
+    ]);
+
+    expect(runCatchCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prTitle: "Fix auth bug",
+        prBody: "Preserve login behavior",
+      }),
+    );
+  });
+
   it("throws on unknown commands", async () => {
     await expect(runCli(["unknown"])).rejects.toThrow("Unknown command");
   });

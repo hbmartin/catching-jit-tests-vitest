@@ -32,8 +32,47 @@ async function setupWorktrees(
 
   logger.info(`Setting up worktrees in ${workDir}`);
 
-  await execInDir("git", ["worktree", "add", parentDir, baseSha], repoRoot);
-  await execInDir("git", ["worktree", "add", childDir, headSha], repoRoot);
+  let parentCreated = false;
+  let childCreated = false;
+
+  try {
+    await execInDir("git", ["worktree", "add", parentDir, baseSha], repoRoot);
+    parentCreated = true;
+    await execInDir("git", ["worktree", "add", childDir, headSha], repoRoot);
+    childCreated = true;
+  } catch (error) {
+    if (childCreated) {
+      try {
+        await execInDir(
+          "git",
+          ["worktree", "remove", childDir, "--force"],
+          repoRoot,
+        );
+      } catch {
+        logger.warn("Failed to remove child worktree after setup error");
+      }
+    }
+
+    if (parentCreated) {
+      try {
+        await execInDir(
+          "git",
+          ["worktree", "remove", parentDir, "--force"],
+          repoRoot,
+        );
+      } catch {
+        logger.warn("Failed to remove parent worktree after setup error");
+      }
+    }
+
+    try {
+      await rm(workDir, { recursive: true, force: true });
+    } catch {
+      logger.warn("Failed to remove temp directory after setup error");
+    }
+
+    throw error;
+  }
 
   logger.info("Worktrees created, installing dependencies");
 

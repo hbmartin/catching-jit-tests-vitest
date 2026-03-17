@@ -26,6 +26,8 @@ catch options
   --timeout <ms>           Per-test timeout
   --output <format>        console | json | github-comment
   --report-threshold <n>   Minimum score to report
+  --pr-title <text>        Pull request title for intent-aware analysis
+  --pr-body <text>         Pull request body for intent-aware analysis
   --cwd <path>             Repository root (default: .)
 `;
 
@@ -57,6 +59,8 @@ const parseCatchOptions = (argv: readonly string[]) => {
       timeout: { type: "string" },
       output: { type: "string" },
       "report-threshold": { type: "string" },
+      "pr-title": { type: "string" },
+      "pr-body": { type: "string" },
       cwd: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
@@ -77,6 +81,8 @@ const parseCatchOptions = (argv: readonly string[]) => {
     timeout: parsed.values.timeout,
     output: parsed.values.output,
     reportThreshold: parsed.values["report-threshold"],
+    prTitle: parsed.values["pr-title"],
+    prBody: parsed.values["pr-body"],
     cwd: parsed.values.cwd,
   });
 };

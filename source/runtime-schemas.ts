@@ -17,6 +17,7 @@ export const inferredRiskSchema = z.object({
   id: z.string(),
   description: z.string(),
   targetSymbol: z.string(),
+  filePath: z.string().nullable().optional(),
   severity: z.enum(["low", "medium", "high", "critical"]),
   mutantHint: z.string().nullable(),
 });
@@ -51,7 +52,7 @@ export type FailureAnalysis = z.infer<typeof failureAnalysisSchema>;
 export const testResultSchema = z.object({
   testFile: z.string(),
   testName: z.string(),
-  status: z.enum(["passed", "failed"]),
+  status: z.enum(["passed", "failed", "skipped"]),
   failureMessage: z.string(),
   duration: z.number().nonnegative(),
   failureAnalysis: failureAnalysisSchema.nullable(),
@@ -62,7 +63,7 @@ export type TestResult = z.infer<typeof testResultSchema>;
 export const vitestAssertionResultSchema = z.object({
   ancestorTitles: z.array(z.string()),
   title: z.string(),
-  status: z.enum(["passed", "failed"]),
+  status: z.enum(["passed", "failed", "skipped"]),
   failureMessages: z.array(z.string()),
   duration: z.number().nonnegative(),
 });
@@ -71,7 +72,7 @@ export type VitestAssertionResult = z.infer<typeof vitestAssertionResultSchema>;
 
 export const vitestFileResultSchema = z.object({
   name: z.string(),
-  status: z.enum(["passed", "failed"]),
+  status: z.enum(["passed", "failed", "skipped"]),
   assertionResults: z.array(vitestAssertionResultSchema),
 });
 
@@ -117,6 +118,8 @@ export const dualExecutionResultSchema = z.object({
   test: generatedTestSchema,
   parentOutcome: testResultSchema,
   childOutcome: testResultSchema,
+  parentExecutionLog: z.string().optional(),
+  childExecutionLog: z.string().optional(),
 });
 
 export type DualExecutionResult = z.infer<typeof dualExecutionResultSchema>;

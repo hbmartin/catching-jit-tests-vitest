@@ -22,6 +22,10 @@ describe("chunk", () => {
     const result = chunk([1, 2, 3], 1);
     expect(result).toEqual([[1], [2], [3]]);
   });
+
+  it("throws for non-positive chunk sizes", () => {
+    expect(() => chunk([1, 2, 3], 0)).toThrow("positive integer");
+  });
 });
 
 describe("mapConcurrent", () => {

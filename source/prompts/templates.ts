@@ -91,6 +91,7 @@ Return JSON (no markdown fencing):
     {
       "id": "risk_1",
       "description": "Concise description of what could go wrong",
+      "filePath": "source/path/to/file.ts or null if unclear",
       "targetSymbol": "functionName or ClassName.methodName",
       "severity": "low|medium|high|critical",
       "mutantHint": "Description of a code change to the PARENT that would exhibit this risk (for mutant generation)"

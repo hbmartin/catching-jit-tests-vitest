@@ -24,8 +24,28 @@ interface LLMClientConfig {
   readonly maxTokens: number;
 }
 
+const modelPricing: Readonly<
+  Record<string, { input: number; output: number }>
+> = {
+  "claude-sonnet-4-20250514": {
+    input: 3,
+    output: 15,
+  },
+};
+
+function getModelPricing(model: string): { input: number; output: number } {
+  return (
+    modelPricing[model] ??
+    modelPricing["claude-sonnet-4-20250514"] ?? {
+      input: 3,
+      output: 15,
+    }
+  );
+}
+
 class LLMClient {
   private readonly client: Anthropic;
+  private readonly apiKey: string;
   private readonly model: string;
   private readonly defaultMaxTokens: number;
   private totalInputTokens = 0;
@@ -34,6 +54,7 @@ class LLMClient {
 
   constructor(config: LLMClientConfig) {
     this.client = new Anthropic({ apiKey: config.apiKey });
+    this.apiKey = config.apiKey;
     this.model = config.model;
     this.defaultMaxTokens = config.maxTokens;
   }
@@ -54,8 +75,13 @@ class LLMClient {
       messages: [{ role: "user", content: request.prompt }],
     });
 
-    const textBlock = message.content.find((block) => block.type === "text");
-    const content = textBlock ? textBlock.text : "";
+    const content = message.content
+      .filter((block): block is Extract<typeof block, { type: "text" }> => {
+        return block.type === "text";
+      })
+      .map((block) => block.text)
+      .join("\n")
+      .trim();
 
     const usage = {
       inputTokens: message.usage.input_tokens,
@@ -84,14 +110,27 @@ class LLMClient {
     return parsed as T;
   }
 
+  withModel(model: string): LLMClient {
+    if (model === this.model) {
+      return this;
+    }
+
+    return new LLMClient({
+      apiKey: this.apiKey,
+      model,
+      maxTokens: this.defaultMaxTokens,
+    });
+  }
+
   getStats(): {
     callCount: number;
     totalInputTokens: number;
     totalOutputTokens: number;
     estimatedCost: number;
   } {
-    const inputCost = (this.totalInputTokens / 1_000_000) * 3;
-    const outputCost = (this.totalOutputTokens / 1_000_000) * 15;
+    const pricing = getModelPricing(this.model);
+    const inputCost = (this.totalInputTokens / 1_000_000) * pricing.input;
+    const outputCost = (this.totalOutputTokens / 1_000_000) * pricing.output;
     return {
       callCount: this.callCount,
       totalInputTokens: this.totalInputTokens,

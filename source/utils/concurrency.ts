@@ -1,4 +1,10 @@
 function chunk<T>(items: readonly T[], size: number): T[][] {
+  if (!Number.isInteger(size) || size <= 0) {
+    throw new Error(
+      `Chunk size must be a positive integer, got ${String(size)}`,
+    );
+  }
+
   const result: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
     result.push(items.slice(i, i + size));

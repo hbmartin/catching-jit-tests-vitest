@@ -33,6 +33,9 @@ interface TestSynthesisRequest {
   readonly existingTests: string | null;
   readonly targetBehavior: TargetBehavior;
   readonly projectContext: ProjectContext;
+  readonly targetSymbol: string;
+  readonly workflow: "dodgy-diff" | "intent-aware";
+  readonly candidateKey: string;
 }
 
 interface GenerationResult {

@@ -4,6 +4,28 @@ import { behaviorReportSchema } from "../runtime-schemas.js";
 
 import type { BehaviorReport } from "./types.js";
 
+function buildHeadline(
+  assessment: AggregatedAssessment,
+  weakCatch: WeakCatch,
+): string {
+  const {
+    behaviorChange: { summary },
+  } = weakCatch;
+
+  if (assessment.verdict === "uncertain") {
+    return `Behavior change requires review: ${summary}`;
+  }
+
+  if (
+    assessment.verdict === "likely-false-positive" ||
+    assessment.verdict === "false-positive"
+  ) {
+    return `Behavior change flagged for review: ${summary}`;
+  }
+
+  return `Potential unexpected behavior change: ${summary}`;
+}
+
 function buildSenseCheck(weakCatch: WeakCatch): string {
   const bc = weakCatch.behaviorChange;
 
@@ -65,7 +87,7 @@ function generateBehaviorReport(
   const senseCheck = buildSenseCheck(weakCatch);
 
   return behaviorReportSchema.parse({
-    headline: `Unexpected behavior change detected: ${bc.summary}`,
+    headline: buildHeadline(assessment, weakCatch),
     senseCheck,
     details: {
       behaviorChange: bc,

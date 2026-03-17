@@ -49,6 +49,17 @@ describe("parseHunks", () => {
     const hunks = parseHunks("");
     expect(hunks).toHaveLength(0);
   });
+
+  it("defaults omitted single-line hunk counts to one", () => {
+    const diff = `@@ -5 +5 @@
+ old
+-old
++new`;
+
+    const hunks = parseHunks(diff);
+    expect(hunks[0]?.oldLines).toBe(1);
+    expect(hunks[0]?.newLines).toBe(1);
+  });
 });
 
 describe("extractChangedSymbols", () => {
@@ -95,5 +106,12 @@ describe("extractChangedSymbols", () => {
 
     const symbols = extractChangedSymbols("source/file.ts", diffContent);
     expect(symbols).toHaveLength(0);
+  });
+
+  it("does not treat named exports containing default as default exports", () => {
+    const diffContent = "+export function defaultHandler() {}";
+
+    const symbols = extractChangedSymbols("source/file.ts", diffContent);
+    expect(symbols[0]?.exportType).toBe("named");
   });
 });

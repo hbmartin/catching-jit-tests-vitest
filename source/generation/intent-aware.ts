@@ -44,6 +44,22 @@ async function inferDiffRisks(
   }
 }
 
+function normalizeTargetSymbol(targetSymbol: string): string {
+  const parts = targetSymbol.split(".");
+  return parts.at(-1) ?? targetSymbol;
+}
+
+function matchesRiskTarget(
+  filePath: string | null | undefined,
+  risk: InferredRisk,
+): boolean {
+  if (risk.filePath) {
+    return filePath === risk.filePath;
+  }
+
+  return true;
+}
+
 async function generateTestsForRisk(
   risk: InferredRisk,
   diff: DiffContext,
@@ -51,20 +67,43 @@ async function generateTestsForRisk(
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<GeneratedTest[]> {
-  const targetFile = diff.files.find((f) =>
-    f.changedFunctions.some((fn) => fn.name === risk.targetSymbol),
-  );
+  const normalizedTarget = normalizeTargetSymbol(risk.targetSymbol);
+  const targetFile = diff.files.find((f) => {
+    if (!matchesRiskTarget(f.path, risk)) {
+      return false;
+    }
+
+    return (
+      f.changedFunctions.some(
+        (fn) =>
+          fn.name === risk.targetSymbol ||
+          fn.name === normalizedTarget ||
+          fn.name.endsWith(`.${normalizedTarget}`),
+      ) ||
+      diff.changedSymbols.some(
+        (symbol) =>
+          symbol.filePath === f.path &&
+          (symbol.name === risk.targetSymbol ||
+            symbol.name === normalizedTarget),
+      )
+    );
+  });
 
   if (!targetFile) {
     logger.warn(`No matching file found for risk target ${risk.targetSymbol}`);
     return [];
   }
 
-  const parentSource = await getFileAtCommit(
-    diff.pr.baseSha,
-    targetFile.path,
-    repoRoot,
+  const changedFunction = targetFile.changedFunctions.find(
+    (fn) =>
+      fn.name === risk.targetSymbol ||
+      fn.name === normalizedTarget ||
+      fn.name.endsWith(`.${normalizedTarget}`),
   );
+
+  const parentSource =
+    (await getFileAtCommit(diff.pr.baseSha, targetFile.path, repoRoot)) ??
+    (await getFileAtCommit(diff.pr.headSha, targetFile.path, repoRoot));
   if (!parentSource) {
     return [];
   }
@@ -83,7 +122,10 @@ async function generateTestsForRisk(
 
   const candidates = await synthesizeMultipleTests(
     {
-      targetSource: parentSource,
+      targetSource:
+        changedFunction?.parentSource ||
+        changedFunction?.childSource ||
+        parentSource,
       targetPath: targetFile.path,
       fullFileSource: mutant.mutantCode,
       existingTests: null,
@@ -97,6 +139,9 @@ async function generateTestsForRisk(
         tsConfigPath: null,
         packageJsonPath: null,
       },
+      targetSymbol: risk.targetSymbol,
+      workflow: "intent-aware",
+      candidateKey: `${targetFile.path}:${risk.targetSymbol}:${risk.id}`,
     },
     llm,
     config.testsPerFunction,
@@ -105,7 +150,6 @@ async function generateTestsForRisk(
   return candidates.map((candidate) => ({
     ...candidate,
     workflow: "intent-aware" as const,
-    targetSymbol: risk.targetSymbol,
     behaviorDescription: `[Risk: ${risk.description}] ${candidate.behaviorDescription}`,
   }));
 }

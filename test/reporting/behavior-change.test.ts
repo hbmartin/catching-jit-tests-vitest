@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { WeakCatch } from "../../source/harvest/types.js";
-import { buildSenseCheck } from "../../source/reporting/behavior-change.js";
+import {
+  buildSenseCheck,
+  generateBehaviorReport,
+} from "../../source/reporting/behavior-change.js";
 
 function makeWeakCatch(
   changeType: WeakCatch["behaviorChange"]["changeType"],
@@ -73,5 +76,22 @@ describe("buildSenseCheck", () => {
     const msg = buildSenseCheck(makeWeakCatch("other"));
     expect(msg).toContain("behavioral difference");
     expect(msg).toContain("Is this expected?");
+  });
+});
+
+describe("generateBehaviorReport", () => {
+  it("uses a softer headline for uncertain assessments", () => {
+    const report = generateBehaviorReport(
+      {
+        assessments: [],
+        combinedScore: 0,
+        verdict: "uncertain",
+        shouldReport: true,
+        dismissalDifficulty: "moderate",
+      },
+      makeWeakCatch("other"),
+    );
+
+    expect(report.headline).toContain("requires review");
   });
 });
