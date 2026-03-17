@@ -1,5 +1,6 @@
 import path from "node:path";
 import { killMutantPrompt } from "../prompts/templates.js";
+import { generatedTestSchema } from "../runtime-schemas.js";
 import type { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
@@ -100,14 +101,14 @@ async function synthesizeTest(
       return null;
     }
 
-    return {
+    return generatedTestSchema.parse({
       code,
       targetSymbol: "",
       testFilePath: deriveTestFilePath(request.targetPath),
       behaviorDescription,
       workflow: "dodgy-diff",
       generatorConfidence: 0.7,
-    };
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`Test synthesis failed: ${message}`);

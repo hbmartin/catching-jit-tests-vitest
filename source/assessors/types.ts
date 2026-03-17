@@ -1,34 +1,15 @@
 import type { DiffContext } from "../diff/types.js";
 import type { BehaviorChange, WeakCatch } from "../harvest/types.js";
+import type {
+  AggregatedAssessment as RuntimeAggregatedAssessment,
+  Assessment as RuntimeAssessment,
+  DetectedPattern as RuntimeDetectedPattern,
+} from "../runtime-schemas.js";
 
 type AssessmentScore = number;
-
-interface DetectedPattern {
-  readonly name: string;
-  readonly direction: "true-positive" | "false-positive";
-  readonly confidence: "high" | "medium" | "low";
-  readonly evidence: string;
-}
-
-interface Assessment {
-  readonly score: AssessmentScore;
-  readonly rationale: string;
-  readonly detectedPatterns: readonly DetectedPattern[];
-  readonly assessor: "rubfake" | "llm-probability" | "llm-ensemble";
-}
-
-interface AggregatedAssessment {
-  readonly assessments: readonly Assessment[];
-  readonly combinedScore: AssessmentScore;
-  readonly verdict:
-    | "strong-catch"
-    | "likely-strong"
-    | "uncertain"
-    | "likely-false-positive"
-    | "false-positive";
-  readonly shouldReport: boolean;
-  readonly dismissalDifficulty: "trivial" | "easy" | "moderate" | "hard";
-}
+type AggregatedAssessment = RuntimeAggregatedAssessment;
+type Assessment = RuntimeAssessment;
+type DetectedPattern = RuntimeDetectedPattern;
 
 interface PatternMatch {
   readonly score: AssessmentScore;
@@ -65,9 +46,15 @@ interface JudgeOutput {
   readonly explanation: string;
 }
 
+interface AssessmentRecord {
+  readonly weakCatch: WeakCatch;
+  readonly assessment: AggregatedAssessment;
+}
+
 export type {
   AggregatedAssessment,
   Assessment,
+  AssessmentRecord,
   AssessmentScore,
   DetectedPattern,
   JudgeInput,

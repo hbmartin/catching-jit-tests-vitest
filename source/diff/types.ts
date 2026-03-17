@@ -54,6 +54,8 @@ interface DiffContext {
   };
   readonly files: readonly ChangedFile[];
   readonly riskScore: number;
+  readonly riskFactors?: RiskFactors;
+  readonly riskReasons?: readonly string[];
   readonly changedSymbols: readonly ChangedSymbol[];
 }
 

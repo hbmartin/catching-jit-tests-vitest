@@ -1,4 +1,5 @@
 import type { DualExecutionResult } from "../execution/types.js";
+import { weakCatchSchema } from "../runtime-schemas.js";
 
 import type { BehaviorChange, WeakCatch } from "./types.js";
 
@@ -100,12 +101,14 @@ function harvestWeakCatches(
         r.parentOutcome.status === "passed" &&
         r.childOutcome.status === "failed",
     )
-    .map((r) => ({
-      test: r.test,
-      parentResult: r.parentOutcome,
-      childResult: r.childOutcome,
-      behaviorChange: describeBehaviorChange(r),
-    }));
+    .map((r) =>
+      weakCatchSchema.parse({
+        test: r.test,
+        parentResult: r.parentOutcome,
+        childResult: r.childOutcome,
+        behaviorChange: describeBehaviorChange(r),
+      }),
+    );
 }
 
 export { describeBehaviorChange, harvestWeakCatches, isBooleanPair };

@@ -1,50 +1,60 @@
-import { execSync } from "node:child_process";
-import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
+import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
-
 import type { GeneratedTest } from "../generation/types.js";
+import {
+  dualExecutionResultSchema,
+  testResultSchema,
+} from "../runtime-schemas.js";
 import { chunk } from "../utils/concurrency.js";
 import { logger } from "../utils/logger.js";
+import { CommandError, runCommand } from "../utils/process.js";
 
 import { parseVitestJsonOutput } from "./result-parser.js";
 import type { DualExecutionResult, TestResult } from "./types.js";
 
-function writeTestFile(projectDir: string, test: GeneratedTest): string {
+async function writeTestFile(
+  projectDir: string,
+  test: GeneratedTest,
+): Promise<string> {
   const fullPath = path.join(projectDir, test.testFilePath);
   const dir = path.dirname(fullPath);
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(fullPath, test.code, "utf-8");
+  await mkdir(dir, { recursive: true });
+  await writeFile(fullPath, test.code, "utf-8");
   return fullPath;
 }
 
-function removeTestFile(projectDir: string, test: GeneratedTest): void {
+async function removeTestFile(
+  projectDir: string,
+  test: GeneratedTest,
+): Promise<void> {
   const fullPath = path.join(projectDir, test.testFilePath);
   try {
-    unlinkSync(fullPath);
+    await unlink(fullPath);
   } catch {
     // File might not exist
   }
 }
 
-function runVitest(
+async function runVitest(
   projectDir: string,
   testFiles: readonly GeneratedTest[],
   timeout: number,
-): TestResult[] {
-  const writtenPaths: string[] = [];
-
-  for (const test of testFiles) {
-    writtenPaths.push(writeTestFile(projectDir, test));
-  }
+): Promise<TestResult[]> {
+  await Promise.all(testFiles.map((test) => writeTestFile(projectDir, test)));
 
   try {
-    const testPaths = testFiles.map((f) => f.testFilePath).join(" ");
-    const result = execSync(
-      `npx vitest run --reporter=json --no-color ${testPaths}`,
+    const result = await runCommand(
+      "npx",
+      [
+        "vitest",
+        "run",
+        "--reporter=json",
+        "--no-color",
+        ...testFiles.map((file) => file.testFilePath),
+      ],
       {
         cwd: projectDir,
         timeout,
-        encoding: "utf-8",
         maxBuffer: 10 * 1024 * 1024,
         env: {
           ...process.env,
@@ -54,15 +64,9 @@ function runVitest(
       },
     );
 
-    return parseVitestJsonOutput(result);
+    return parseVitestJsonOutput(result.stdout);
   } catch (err: unknown) {
-    if (
-      err &&
-      typeof err === "object" &&
-      "stdout" in err &&
-      typeof err.stdout === "string" &&
-      err.stdout.length > 0
-    ) {
+    if (err instanceof CommandError && err.stdout.length > 0) {
       try {
         return parseVitestJsonOutput(err.stdout);
       } catch {
@@ -71,33 +75,35 @@ function runVitest(
     }
 
     logger.error("Vitest execution failed");
-    return testFiles.map((test) => ({
-      testFile: test.testFilePath,
-      testName: test.behaviorDescription,
-      status: "failed" as const,
-      failureMessage: "Vitest execution failed",
-      duration: 0,
-      failureAnalysis: null,
-    }));
+    return testFiles.map((test) =>
+      testResultSchema.parse({
+        testFile: test.testFilePath,
+        testName: test.behaviorDescription,
+        status: "failed" as const,
+        failureMessage: "Vitest execution failed",
+        duration: 0,
+        failureAnalysis: null,
+      }),
+    );
   } finally {
-    for (const test of testFiles) {
-      removeTestFile(projectDir, test);
-    }
+    await Promise.all(
+      testFiles.map((test) => removeTestFile(projectDir, test)),
+    );
   }
 }
 
 function buildDefaultOutcome(test: GeneratedTest): TestResult {
-  return {
+  return testResultSchema.parse({
     testFile: test.testFilePath,
     testName: test.behaviorDescription,
     status: "failed" as const,
     failureMessage: "No result from execution",
     duration: 0,
     failureAnalysis: null,
-  };
+  });
 }
 
-function dualExecution(
+async function dualExecution(
   tests: readonly GeneratedTest[],
   parentDir: string,
   childDir: string,
@@ -110,21 +116,25 @@ function dualExecution(
   for (const batch of batches) {
     logger.info(`Running batch of ${String(batch.length)} tests`);
 
-    const parentResults = runVitest(parentDir, batch, testTimeout);
-    const childResults = runVitest(childDir, batch, testTimeout);
+    const [parentResults, childResults] = await Promise.all([
+      runVitest(parentDir, batch, testTimeout),
+      runVitest(childDir, batch, testTimeout),
+    ]);
 
     const batchResults = batch
       .filter((test): test is GeneratedTest => Boolean(test))
-      .map((currentTest, i) => ({
-        test: currentTest,
-        parentOutcome: parentResults[i] ?? buildDefaultOutcome(currentTest),
-        childOutcome: childResults[i] ?? buildDefaultOutcome(currentTest),
-      }));
+      .map((currentTest, i) =>
+        dualExecutionResultSchema.parse({
+          test: currentTest,
+          parentOutcome: parentResults[i] ?? buildDefaultOutcome(currentTest),
+          childOutcome: childResults[i] ?? buildDefaultOutcome(currentTest),
+        }),
+      );
 
     results.push(...batchResults);
   }
 
-  return Promise.resolve(results);
+  return results;
 }
 
 export { dualExecution, runVitest };

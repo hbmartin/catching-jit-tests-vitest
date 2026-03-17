@@ -1,16 +1,20 @@
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
-
 import {
   analyzeFileChanges,
   extractFunctions,
 } from "../../source/diff/ast-analyzer.js";
-import ts from "typescript";
 
 describe("extractFunctions", () => {
   it("extracts function declarations", () => {
     const source = `function hello() { return "world"; }
 function goodbye() { return "bye"; }`;
-    const sf = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
+    const sf = ts.createSourceFile(
+      "test.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
     const functions = extractFunctions(sf);
     expect(functions).toHaveLength(2);
     expect(functions[0]?.name).toBe("hello");
@@ -18,8 +22,13 @@ function goodbye() { return "bye"; }`;
   });
 
   it("extracts arrow function declarations", () => {
-    const source = `const greet = (name: string) => \`Hello \${name}\`;`;
-    const sf = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
+    const source = String.raw`const greet = (name: string) => \`Hello \${name}\`;`;
+    const sf = ts.createSourceFile(
+      "test.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
     const functions = extractFunctions(sf);
     expect(functions).toHaveLength(1);
     expect(functions[0]?.name).toBe("greet");
@@ -28,7 +37,12 @@ function goodbye() { return "bye"; }`;
   it("returns empty for files without functions", () => {
     const source = `const x = 42;
 type Foo = string;`;
-    const sf = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
+    const sf = ts.createSourceFile(
+      "test.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
     const functions = extractFunctions(sf);
     expect(functions).toHaveLength(0);
   });
@@ -49,7 +63,7 @@ describe("analyzeFileChanges", () => {
   });
 
   it("detects added exports", () => {
-    const parent = `export function foo() {}`;
+    const parent = "export function foo() {}";
     const child = `export function foo() {}
 export function bar() {}`;
 
@@ -60,7 +74,7 @@ export function bar() {}`;
   it("detects removed exports", () => {
     const parent = `export function foo() {}
 export function bar() {}`;
-    const child = `export function foo() {}`;
+    const child = "export function foo() {}";
 
     const analysis = analyzeFileChanges(parent, child, "file.ts");
     expect(analysis.removedExports).toContain("bar");

@@ -1,3 +1,11 @@
+import type {
+  GeneratedTest as RuntimeGeneratedTest,
+  InferredRisk as RuntimeInferredRisk,
+} from "../runtime-schemas.js";
+
+type GeneratedTest = RuntimeGeneratedTest;
+type InferredRisk = RuntimeInferredRisk;
+
 interface MutantTarget {
   readonly kind: "mutant";
   readonly mutantDiff: string;
@@ -27,27 +35,10 @@ interface TestSynthesisRequest {
   readonly projectContext: ProjectContext;
 }
 
-interface GeneratedTest {
-  readonly code: string;
-  readonly targetSymbol: string;
-  readonly testFilePath: string;
-  readonly behaviorDescription: string;
-  readonly workflow: "dodgy-diff" | "intent-aware";
-  readonly generatorConfidence: number;
-}
-
 interface GenerationResult {
   readonly tests: readonly GeneratedTest[];
   readonly workflow: "dodgy-diff" | "intent-aware";
   readonly duration: number;
-}
-
-interface InferredRisk {
-  readonly id: string;
-  readonly description: string;
-  readonly targetSymbol: string;
-  readonly severity: "low" | "medium" | "high" | "critical";
-  readonly mutantHint: string | null;
 }
 
 interface MutantCandidate {

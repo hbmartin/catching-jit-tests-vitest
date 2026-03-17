@@ -9,7 +9,6 @@
     "ignoreUnknown": false,
     "includes": [
       "**",
-      "!.release-please-manifest.json",
       "!dist",
       "!coverage",
       "!.cache"
@@ -361,7 +360,7 @@
       }
     },
     {
-      "includes": ["vitest.config.ts", "commitlint.config.js"],
+      "includes": ["vitest.config.ts"],
       "linter": {
         "rules": {
           "style": {

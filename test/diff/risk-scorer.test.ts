@@ -6,9 +6,7 @@ import {
 } from "../../source/diff/risk-scorer.js";
 import type { DiffContext } from "../../source/diff/types.js";
 
-function makeDiffContext(
-  overrides: Partial<DiffContext> = {},
-): DiffContext {
+function makeDiffContext(overrides: Partial<DiffContext> = {}): DiffContext {
   return {
     rawDiff: "",
     pr: {
@@ -38,17 +36,19 @@ describe("computeRiskFactors", () => {
   it("detects high sensitivity for auth-related files", () => {
     const diff = makeDiffContext({
       rawDiff: "auth token validation",
-      files: [{
-        path: "source/auth/login.ts",
-        hunks: [],
-        existingTestFile: null,
-        changedExports: [],
-        changedFunctions: [],
-        touchesAuth: true,
-        touchesPayments: false,
-        touchesDataModel: false,
-        touchesAccessControl: false,
-      }],
+      files: [
+        {
+          path: "source/auth/login.ts",
+          hunks: [],
+          existingTestFile: null,
+          changedExports: [],
+          changedFunctions: [],
+          touchesAuth: true,
+          touchesPayments: false,
+          touchesDataModel: false,
+          touchesAccessControl: false,
+        },
+      ],
     });
     const factors = computeRiskFactors(diff);
     expect(factors.sensitivityScore).toBeGreaterThanOrEqual(0.9);
@@ -57,17 +57,19 @@ describe("computeRiskFactors", () => {
   it("detects high sensitivity for payment-related files", () => {
     const diff = makeDiffContext({
       rawDiff: "payment billing",
-      files: [{
-        path: "source/billing/charge.ts",
-        hunks: [],
-        existingTestFile: null,
-        changedExports: [],
-        changedFunctions: [],
-        touchesAuth: false,
-        touchesPayments: true,
-        touchesDataModel: false,
-        touchesAccessControl: false,
-      }],
+      files: [
+        {
+          path: "source/billing/charge.ts",
+          hunks: [],
+          existingTestFile: null,
+          changedExports: [],
+          changedFunctions: [],
+          touchesAuth: false,
+          touchesPayments: true,
+          touchesDataModel: false,
+          touchesAccessControl: false,
+        },
+      ],
     });
     const factors = computeRiskFactors(diff);
     expect(factors.sensitivityScore).toBeGreaterThanOrEqual(0.95);
@@ -115,17 +117,28 @@ describe("computeRiskScore", () => {
   it("returns a value between 0 and 1", () => {
     const diff = makeDiffContext({
       rawDiff: "auth login payment\n+function foo() {}\n+function bar() {}",
-      files: [{
-        path: "source/auth.ts",
-        hunks: [{ header: "@@ -1,3 +1,5 @@", oldStart: 1, oldLines: 3, newStart: 1, newLines: 5, content: "" }],
-        existingTestFile: null,
-        changedExports: [],
-        changedFunctions: [],
-        touchesAuth: true,
-        touchesPayments: false,
-        touchesDataModel: false,
-        touchesAccessControl: false,
-      }],
+      files: [
+        {
+          path: "source/auth.ts",
+          hunks: [
+            {
+              header: "@@ -1,3 +1,5 @@",
+              oldStart: 1,
+              oldLines: 3,
+              newStart: 1,
+              newLines: 5,
+              content: "",
+            },
+          ],
+          existingTestFile: null,
+          changedExports: [],
+          changedFunctions: [],
+          touchesAuth: true,
+          touchesPayments: false,
+          touchesDataModel: false,
+          touchesAccessControl: false,
+        },
+      ],
     });
     const score = computeRiskScore(diff);
     expect(score).toBeGreaterThan(0);

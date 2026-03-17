@@ -1,5 +1,6 @@
 import type { AggregatedAssessment } from "../assessors/types.js";
 import type { WeakCatch } from "../harvest/types.js";
+import { behaviorReportSchema } from "../runtime-schemas.js";
 
 import type { BehaviorReport } from "./types.js";
 
@@ -63,7 +64,7 @@ function generateBehaviorReport(
   const bc = weakCatch.behaviorChange;
   const senseCheck = buildSenseCheck(weakCatch);
 
-  return {
+  return behaviorReportSchema.parse({
     headline: `Unexpected behavior change detected: ${bc.summary}`,
     senseCheck,
     details: {
@@ -73,7 +74,7 @@ function generateBehaviorReport(
       testCode: weakCatch.test.code,
       dismissalEstimate: getDismissalEstimate(assessment.dismissalDifficulty),
     },
-  };
+  });
 }
 
 export { buildSenseCheck, generateBehaviorReport };

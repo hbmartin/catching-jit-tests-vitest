@@ -57,7 +57,10 @@ describe("extractChangedSymbols", () => {
 +  return String(x);
 +}`;
 
-    const symbols = extractChangedSymbols("source/utils/helper.ts", diffContent);
+    const symbols = extractChangedSymbols(
+      "source/utils/helper.ts",
+      diffContent,
+    );
     expect(symbols).toHaveLength(1);
     expect(symbols[0]?.name).toBe("newHelper");
     expect(symbols[0]?.kind).toBe("function");
@@ -69,14 +72,17 @@ describe("extractChangedSymbols", () => {
 +  private readonly db: Database;
 +}`;
 
-    const symbols = extractChangedSymbols("source/services/user.ts", diffContent);
+    const symbols = extractChangedSymbols(
+      "source/services/user.ts",
+      diffContent,
+    );
     expect(symbols).toHaveLength(1);
     expect(symbols[0]?.name).toBe("UserService");
     expect(symbols[0]?.kind).toBe("class");
   });
 
   it("detects internal (non-exported) symbols", () => {
-    const diffContent = `+function internalHelper() {}`;
+    const diffContent = "+function internalHelper() {}";
 
     const symbols = extractChangedSymbols("source/utils.ts", diffContent);
     expect(symbols).toHaveLength(1);

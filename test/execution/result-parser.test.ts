@@ -23,13 +23,17 @@ describe("analyzeFailure", () => {
   });
 
   it("detects runtime errors", () => {
-    const result = analyzeFailure("TypeError: Cannot read properties of undefined");
+    const result = analyzeFailure(
+      "TypeError: Cannot read properties of undefined",
+    );
     expect(result.isRuntimeError).toBe(true);
     expect(result.errorClass).toBe("TypeError");
   });
 
   it("extracts stack trace", () => {
-    const result = analyzeFailure("Error: fail\n    at Object.test (test.ts:10:5)\n    at run (runner.ts:20:3)");
+    const result = analyzeFailure(
+      "Error: fail\n    at Object.test (test.ts:10:5)\n    at run (runner.ts:20:3)",
+    );
     expect(result.stackTrace).toContain("at Object.test");
   });
 
@@ -42,17 +46,21 @@ describe("analyzeFailure", () => {
 describe("parseVitestJsonOutput", () => {
   it("parses passed test results", () => {
     const json = JSON.stringify({
-      testResults: [{
-        name: "test/example.test.ts",
-        status: "passed",
-        assertionResults: [{
-          ancestorTitles: ["describe"],
-          title: "should work",
+      testResults: [
+        {
+          name: "test/example.test.ts",
           status: "passed",
-          failureMessages: [],
-          duration: 50,
-        }],
-      }],
+          assertionResults: [
+            {
+              ancestorTitles: ["describe"],
+              title: "should work",
+              status: "passed",
+              failureMessages: [],
+              duration: 50,
+            },
+          ],
+        },
+      ],
     });
 
     const results = parseVitestJsonOutput(json);
@@ -64,17 +72,21 @@ describe("parseVitestJsonOutput", () => {
 
   it("parses failed test results with failure analysis", () => {
     const json = JSON.stringify({
-      testResults: [{
-        name: "test/example.test.ts",
-        status: "failed",
-        assertionResults: [{
-          ancestorTitles: ["suite"],
-          title: "should fail",
+      testResults: [
+        {
+          name: "test/example.test.ts",
           status: "failed",
-          failureMessages: ["Expected: true\nReceived: false"],
-          duration: 30,
-        }],
-      }],
+          assertionResults: [
+            {
+              ancestorTitles: ["suite"],
+              title: "should fail",
+              status: "failed",
+              failureMessages: ["Expected: true\nReceived: false"],
+              duration: 30,
+            },
+          ],
+        },
+      ],
     });
 
     const results = parseVitestJsonOutput(json);

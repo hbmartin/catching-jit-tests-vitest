@@ -2,6 +2,7 @@ import type { JiTTestConfig } from "../config.js";
 import { getFileAtCommit } from "../diff/extractor.js";
 import type { DiffContext } from "../diff/types.js";
 import { inferRisksPrompt } from "../prompts/templates.js";
+import { inferRisksResponseSchema } from "../runtime-schemas.js";
 import type { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
@@ -11,11 +12,6 @@ import {
   synthesizeMultipleTests,
 } from "./test-synthesizer.js";
 import type { GeneratedTest, InferredRisk } from "./types.js";
-
-interface InferRisksResponse {
-  readonly intent: string;
-  readonly risks: readonly InferredRisk[];
-}
 
 async function inferDiffRisks(
   diff: DiffContext,
@@ -28,11 +24,14 @@ async function inferDiffRisks(
   });
 
   try {
-    const response = await llm.completeJson<InferRisksResponse>({
-      prompt,
-      systemPrompt:
-        "You are a security-minded code reviewer identifying risks in code changes.",
-    });
+    const response = await llm.completeJson(
+      {
+        prompt,
+        systemPrompt:
+          "You are a security-minded code reviewer identifying risks in code changes.",
+      },
+      inferRisksResponseSchema,
+    );
 
     logger.info(
       `Inferred ${String(response.risks.length)} risks: ${response.intent}`,
@@ -48,6 +47,7 @@ async function inferDiffRisks(
 async function generateTestsForRisk(
   risk: InferredRisk,
   diff: DiffContext,
+  repoRoot: string,
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<GeneratedTest[]> {
@@ -60,7 +60,11 @@ async function generateTestsForRisk(
     return [];
   }
 
-  const parentSource = getFileAtCommit(diff.pr.baseSha, targetFile.path);
+  const parentSource = await getFileAtCommit(
+    diff.pr.baseSha,
+    targetFile.path,
+    repoRoot,
+  );
   if (!parentSource) {
     return [];
   }
@@ -98,16 +102,17 @@ async function generateTestsForRisk(
     config.testsPerFunction,
   );
 
-  return candidates.map((c) => ({
-    ...c,
+  return candidates.map((candidate) => ({
+    ...candidate,
     workflow: "intent-aware" as const,
     targetSymbol: risk.targetSymbol,
-    behaviorDescription: `[Risk: ${risk.description}] ${c.behaviorDescription}`,
+    behaviorDescription: `[Risk: ${risk.description}] ${candidate.behaviorDescription}`,
   }));
 }
 
 async function intentAwareWorkflow(
   diff: DiffContext,
+  repoRoot: string,
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<GeneratedTest[]> {
@@ -119,7 +124,7 @@ async function intentAwareWorkflow(
   }
 
   const riskTestPromises = risks.map((risk) =>
-    generateTestsForRisk(risk, diff, llm, config),
+    generateTestsForRisk(risk, diff, repoRoot, llm, config),
   );
   const riskTestResults = await Promise.all(riskTestPromises);
   const tests = riskTestResults.flat();

@@ -71,23 +71,35 @@ function makeWeakCatch(
 
 describe("estimateDismissalDifficulty", () => {
   it("returns trivial for boolean flips", () => {
-    expect(estimateDismissalDifficulty(makeWeakCatch("boolean-flipped"))).toBe("trivial");
+    expect(estimateDismissalDifficulty(makeWeakCatch("boolean-flipped"))).toBe(
+      "trivial",
+    );
   });
 
   it("returns easy for null-introduced", () => {
-    expect(estimateDismissalDifficulty(makeWeakCatch("null-introduced"))).toBe("easy");
+    expect(estimateDismissalDifficulty(makeWeakCatch("null-introduced"))).toBe(
+      "easy",
+    );
   });
 
   it("returns easy for return-value-changed", () => {
-    expect(estimateDismissalDifficulty(makeWeakCatch("return-value-changed"))).toBe("easy");
+    expect(
+      estimateDismissalDifficulty(makeWeakCatch("return-value-changed")),
+    ).toBe("easy");
   });
 
   it("returns moderate for exceptions", () => {
-    expect(estimateDismissalDifficulty(makeWeakCatch("exception-introduced"))).toBe("moderate");
+    expect(
+      estimateDismissalDifficulty(makeWeakCatch("exception-introduced")),
+    ).toBe("moderate");
   });
 
   it("returns hard for complex changes", () => {
-    expect(estimateDismissalDifficulty(makeWeakCatch("output-shape-changed"))).toBe("hard");
-    expect(estimateDismissalDifficulty(makeWeakCatch("ordering-changed"))).toBe("hard");
+    expect(
+      estimateDismissalDifficulty(makeWeakCatch("output-shape-changed")),
+    ).toBe("hard");
+    expect(estimateDismissalDifficulty(makeWeakCatch("ordering-changed"))).toBe(
+      "hard",
+    );
   });
 });

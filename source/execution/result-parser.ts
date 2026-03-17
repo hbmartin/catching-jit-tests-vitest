@@ -1,4 +1,8 @@
-import type { FailureAnalysis, TestResult, VitestJsonOutput } from "./types.js";
+import {
+  testResultSchema,
+  vitestJsonOutputSchema,
+} from "../runtime-schemas.js";
+import type { FailureAnalysis, TestResult } from "./types.js";
 
 const assertionTypePatterns: readonly {
   pattern: RegExp;
@@ -94,12 +98,13 @@ function analyzeFailure(failureMessage: string): FailureAnalysis {
 }
 
 function parseVitestJsonOutput(stdout: string): TestResult[] {
-  const json: VitestJsonOutput = JSON.parse(stdout);
+  const json = vitestJsonOutputSchema.parse(JSON.parse(stdout));
 
   return json.testResults.flatMap((file) =>
     file.assertionResults.map((assertion) => {
       const failureMessage = assertion.failureMessages.join("\n");
-      return {
+
+      return testResultSchema.parse({
         testFile: file.name,
         testName: [...assertion.ancestorTitles, assertion.title].join(" > "),
         status: assertion.status,
@@ -107,7 +112,7 @@ function parseVitestJsonOutput(stdout: string): TestResult[] {
         duration: assertion.duration,
         failureAnalysis:
           assertion.status === "failed" ? analyzeFailure(failureMessage) : null,
-      };
+      });
     }),
   );
 }

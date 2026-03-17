@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import type { ZodType } from "zod";
 
 import { logger } from "./logger.js";
 
@@ -68,13 +69,19 @@ class LLMClient {
     return { content, usage };
   }
 
-  async completeJson<T>(request: LLMRequest): Promise<T> {
+  async completeJson<T>(request: LLMRequest, schema?: ZodType<T>): Promise<T> {
     const response = await this.complete(request);
     const cleaned = response.content
       .replace(/```json\n?/g, "")
       .replace(/```\n?/g, "")
       .trim();
-    return JSON.parse(cleaned) as T;
+    const parsed = JSON.parse(cleaned) as unknown;
+
+    if (schema) {
+      return schema.parse(parsed);
+    }
+
+    return parsed as T;
   }
 
   getStats(): {

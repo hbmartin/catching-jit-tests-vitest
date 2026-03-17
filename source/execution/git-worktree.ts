@@ -1,71 +1,85 @@
-import { execSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
+import { runCommand } from "../utils/process.js";
 
 import type { WorktreeSetup } from "./types.js";
 
-function execInDir(command: string, cwd: string): string {
-  return execSync(command, {
+async function execInDir(
+  command: string,
+  args: readonly string[],
+  cwd: string,
+): Promise<string> {
+  const result = await runCommand(command, args, {
     cwd,
-    encoding: "utf-8",
     maxBuffer: 10 * 1024 * 1024,
     timeout: 120_000,
-  }).trim();
+  });
+
+  return result.stdout.trim();
 }
 
-function setupWorktrees(
+async function setupWorktrees(
   repoRoot: string,
   baseSha: string,
   headSha: string,
-): WorktreeSetup {
-  const workDir = mkdtempSync(path.join(tmpdir(), "jittest-"));
+): Promise<WorktreeSetup> {
+  const workDir = await mkdtemp(path.join(tmpdir(), "jittest-"));
   const parentDir = path.join(workDir, "parent");
   const childDir = path.join(workDir, "child");
 
   logger.info(`Setting up worktrees in ${workDir}`);
 
-  execInDir(`git worktree add "${parentDir}" ${baseSha}`, repoRoot);
-  execInDir(`git worktree add "${childDir}" ${headSha}`, repoRoot);
+  await execInDir("git", ["worktree", "add", parentDir, baseSha], repoRoot);
+  await execInDir("git", ["worktree", "add", childDir, headSha], repoRoot);
 
   logger.info("Worktrees created, installing dependencies");
 
   return {
     parentDir,
     childDir,
-    cleanup: () => {
+    cleanup: async () => {
       logger.info("Cleaning up worktrees");
       try {
-        execInDir(`git worktree remove "${parentDir}" --force`, repoRoot);
+        await execInDir(
+          "git",
+          ["worktree", "remove", parentDir, "--force"],
+          repoRoot,
+        );
       } catch {
         logger.warn("Failed to remove parent worktree");
       }
       try {
-        execInDir(`git worktree remove "${childDir}" --force`, repoRoot);
+        await execInDir(
+          "git",
+          ["worktree", "remove", childDir, "--force"],
+          repoRoot,
+        );
       } catch {
         logger.warn("Failed to remove child worktree");
       }
       try {
-        rmSync(workDir, { recursive: true, force: true });
+        await rm(workDir, { recursive: true, force: true });
       } catch {
         logger.warn("Failed to remove temp directory");
       }
-      return Promise.resolve();
     },
   };
 }
 
-function installDependencies(projectDir: string): void {
+async function installDependencies(projectDir: string): Promise<void> {
   logger.info(`Installing dependencies in ${projectDir}`);
   try {
-    execInDir("npm ci --prefer-offline", projectDir);
+    await execInDir("npm", ["ci", "--prefer-offline"], projectDir);
+    return;
   } catch {
     try {
-      execInDir("pnpm install --frozen-lockfile", projectDir);
+      await execInDir("pnpm", ["install", "--frozen-lockfile"], projectDir);
+      return;
     } catch {
-      execInDir("yarn install --frozen-lockfile", projectDir);
+      await execInDir("yarn", ["install", "--frozen-lockfile"], projectDir);
     }
   }
 }
