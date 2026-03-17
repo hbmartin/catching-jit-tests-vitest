@@ -68,15 +68,14 @@ async function assessWeakCatch(
     testCode: weakCatch.test.code,
   };
 
-  const rubfakeResult = evaluateRubFake(ctx);
+  const assessments: Assessment[] = [];
 
-  let llmEnsembleResult: Assessment = {
-    score: 0,
-    rationale: "LLM judge disabled",
-    detectedPatterns: [],
-    assessor: "llm-ensemble",
-  };
+  const rubfakeResult = config.rubfakeEnabled ? evaluateRubFake(ctx) : null;
+  if (rubfakeResult) {
+    assessments.push(rubfakeResult);
+  }
 
+  let llmEnsembleResult: Assessment | null = null;
   if (config.llmJudgeEnabled) {
     llmEnsembleResult = await ensembleJudge(
       {
@@ -90,23 +89,25 @@ async function assessWeakCatch(
       llm,
       config,
     );
+    assessments.push(llmEnsembleResult);
   }
 
-  const assessments = [rubfakeResult, llmEnsembleResult];
-
-  const rubfakeScore = rubfakeResult.score;
-  const llmScore = llmEnsembleResult.score;
-
-  let combinedScore: number;
-
-  const hasHighConfidenceFP = rubfakeResult.detectedPatterns.some(
-    (p) => p.confidence === "high" && p.direction === "false-positive",
-  );
-
-  if (rubfakeScore <= -0.8 && hasHighConfidenceFP) {
-    combinedScore = rubfakeScore;
+  let combinedScore = 0;
+  if (rubfakeResult && llmEnsembleResult) {
+    const hasHighConfidenceFP = rubfakeResult.detectedPatterns.some(
+      (p) => p.confidence === "high" && p.direction === "false-positive",
+    );
+    if (rubfakeResult.score <= -0.8 && hasHighConfidenceFP) {
+      combinedScore = rubfakeResult.score;
+    } else {
+      combinedScore = rubfakeResult.score * 0.4 + llmEnsembleResult.score * 0.6;
+    }
+  } else if (rubfakeResult) {
+    combinedScore = rubfakeResult.score;
+  } else if (llmEnsembleResult) {
+    combinedScore = llmEnsembleResult.score;
   } else {
-    combinedScore = rubfakeScore * 0.4 + llmScore * 0.6;
+    combinedScore = 0;
   }
 
   const dismissalDifficulty = estimateDismissalDifficulty(weakCatch);
@@ -121,7 +122,10 @@ async function assessWeakCatch(
     moderate: 0.3,
     hard: 0.5,
   };
-  const reportThreshold = thresholdMap[dismissalDifficulty];
+  const reportThreshold = Math.max(
+    config.reportThreshold,
+    thresholdMap[dismissalDifficulty],
+  );
 
   return aggregatedAssessmentSchema.parse({
     assessments,

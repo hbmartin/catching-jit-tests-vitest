@@ -1,5 +1,19 @@
 import type { BehaviorReport, RunStats } from "./types.js";
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
+function formatBlockquote(value: string): string {
+  return escapeHtml(value)
+    .split("\n")
+    .map((line) => `> ${line}`)
+    .join("\n");
+}
+
 function formatPRComment(
   reports: readonly BehaviorReport[],
   stats: RunStats,
@@ -10,19 +24,19 @@ function formatPRComment(
 
   const sections = reports
     .map(
-      (report, i) => `### ${String(i + 1)}. ${report.headline}
+      (report, i) => `### ${String(i + 1)}. ${escapeHtml(report.headline)}
 
-> ${report.senseCheck}
+${formatBlockquote(report.senseCheck)}
 
 <details>
 <summary>Details (estimated ${report.details.dismissalEstimate} to review)</summary>
 
-**Before:** ${report.details.behaviorChange.parentBehavior}
-**After:** ${report.details.behaviorChange.childBehavior}
-**Confidence:** ${report.details.verdict}
+**Before:** ${escapeHtml(report.details.behaviorChange.parentBehavior)}
+**After:** ${escapeHtml(report.details.behaviorChange.childBehavior)}
+**Confidence:** ${escapeHtml(report.details.verdict)}
 
 **Assessment rationale:**
-${report.details.assessorRationales.map((r) => `- ${r}`).join("\n")}
+${report.details.assessorRationales.map((r) => `- ${escapeHtml(r)}`).join("\n")}
 
 <details>
 <summary>Generated test code</summary>

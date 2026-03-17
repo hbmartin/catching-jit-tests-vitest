@@ -47,7 +47,8 @@ const clampScore = (value: number): number => Math.max(0, Math.min(1, value));
 
 const matchesSensitivityLabel = (diff: DiffContext, label: string): boolean =>
   diff.files.some((file) => {
-    const combined = `${file.path}\n${diff.rawDiff}`;
+    const fileDiff = file.hunks.map((hunk) => hunk.content).join("\n");
+    const combined = `${file.path}\n${fileDiff}`;
 
     return sensitivityPatterns.some(
       (pattern) => pattern.label === label && pattern.pattern.test(combined),
@@ -78,7 +79,8 @@ const calculateSensitivityScore = (diff: DiffContext): number => {
       maxWeight = Math.max(maxWeight, 0.7);
     }
 
-    const combined = `${file.path}\n${diff.rawDiff}`;
+    const fileDiff = file.hunks.map((hunk) => hunk.content).join("\n");
+    const combined = `${file.path}\n${fileDiff}`;
 
     for (const { pattern, weight } of sensitivityPatterns) {
       if (pattern.test(combined)) {

@@ -12,6 +12,8 @@ interface ChangedFunction {
   readonly filePath: string;
   readonly parentSource: string;
   readonly childSource: string;
+  readonly parentFileSource: string;
+  readonly childFileSource: string;
   readonly hunks: readonly DiffHunk[];
   readonly signature: string;
   readonly requiredImports: readonly string[];
@@ -68,6 +70,7 @@ interface SignatureChange {
 interface FunctionInfo {
   readonly name: string;
   readonly body: string;
+  readonly signature: string;
   readonly startLine: number;
   readonly endLine: number;
 }

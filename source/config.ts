@@ -44,6 +44,8 @@ const catchCommandOptionsSchema = z.object({
   output: outputFormatSchema.default("console"),
   reportThreshold: z.coerce.number().min(-1).max(1).default(0),
   cwd: z.string().default("."),
+  prTitle: z.string().default(""),
+  prBody: z.string().default(""),
 });
 
 type CatchCommandOptions = z.infer<typeof catchCommandOptionsSchema>;
@@ -64,12 +66,13 @@ function createDefaultConfig(): JiTTestConfig {
 function loadConfig(overrides: Record<string, unknown> = {}): JiTTestConfig {
   // biome-ignore lint/complexity/useLiteralKeys: index signature access
   const llmOverrides = (overrides["llm"] as Record<string, unknown>) ?? {};
+  const { llm: _ignoredLlm, ...restOverrides } = overrides;
   const base = {
+    ...restOverrides,
     llm: {
       apiKey: getApiKey(),
       ...llmOverrides,
     },
-    ...overrides,
   };
   return jitTestConfigSchema.parse(base);
 }

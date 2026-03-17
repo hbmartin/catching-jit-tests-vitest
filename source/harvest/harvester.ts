@@ -29,8 +29,8 @@ function describeBehaviorChange(result: DualExecutionResult): BehaviorChange {
 
   if (failure.isRuntimeError && failure.errorClass === "TypeError") {
     const hasNullish =
-      (failure.actual?.includes("null") ?? false) ||
-      (failure.actual?.includes("undefined") ?? false);
+      childOutcome.failureMessage.includes("null") ||
+      childOutcome.failureMessage.includes("undefined");
     if (hasNullish) {
       return {
         summary: `A value that was previously defined is now ${failure.actual ?? "null/undefined"}`,
@@ -53,7 +53,7 @@ function describeBehaviorChange(result: DualExecutionResult): BehaviorChange {
     };
   }
 
-  if (failure.isRuntimeError && !failure.errorClass) {
+  if (failure.isRuntimeError) {
     return {
       summary: "Code that previously succeeded now throws an error",
       parentBehavior: "No exception thrown",
@@ -107,6 +107,7 @@ function harvestWeakCatches(
         parentResult: r.parentOutcome,
         childResult: r.childOutcome,
         behaviorChange: describeBehaviorChange(r),
+        executionLog: r.childExecutionLog ?? r.childOutcome.failureMessage,
       }),
     );
 }

@@ -75,6 +75,37 @@ describe("computeRiskFactors", () => {
     expect(factors.sensitivityScore).toBeGreaterThanOrEqual(0.95);
   });
 
+  it("does not inherit sensitivity from unrelated raw diff content", () => {
+    const diff = makeDiffContext({
+      rawDiff: "source/auth.ts\n+token validation changed",
+      files: [
+        {
+          path: "source/utils/math.ts",
+          hunks: [
+            {
+              header: "@@ -1,1 +1,1 @@",
+              oldStart: 1,
+              oldLines: 1,
+              newStart: 1,
+              newLines: 1,
+              content: "+return value * 2;",
+            },
+          ],
+          existingTestFile: null,
+          changedExports: [],
+          changedFunctions: [],
+          touchesAuth: false,
+          touchesPayments: false,
+          touchesDataModel: false,
+          touchesAccessControl: false,
+        },
+      ],
+    });
+
+    const factors = computeRiskFactors(diff);
+    expect(factors.sensitivityScore).toBeLessThan(0.9);
+  });
+
   it("computes coverage gap from files without tests", () => {
     const diff = makeDiffContext({
       files: [

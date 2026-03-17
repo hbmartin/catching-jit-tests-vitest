@@ -1,8 +1,10 @@
 import { access } from "node:fs/promises";
 import path from "node:path";
+import ts from "typescript";
 
 import { CommandError, runCommand } from "../utils/process.js";
 
+import { analyzeFileChanges, extractFunctions } from "./ast-analyzer.js";
 import type {
   ChangedFile,
   ChangedFunction,
@@ -12,6 +14,14 @@ import type {
 } from "./types.js";
 
 const hunkHeaderRegex = /^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/;
+
+function parseHunkLineCount(value: string | undefined): number {
+  if (value === undefined || value.length === 0) {
+    return 1;
+  }
+
+  return Number.parseInt(value, 10);
+}
 
 function parseHunks(diffText: string): DiffHunk[] {
   const hunks: DiffHunk[] = [];
@@ -32,9 +42,9 @@ function parseHunks(diffText: string): DiffHunk[] {
       currentHunk = {
         header: line,
         oldStart: Number.parseInt(match[1] ?? "0", 10),
-        oldLines: Number.parseInt(match[2] ?? "1", 10),
+        oldLines: parseHunkLineCount(match[2]),
         newStart: Number.parseInt(match[3] ?? "0", 10),
-        newLines: Number.parseInt(match[4] ?? "1", 10),
+        newLines: parseHunkLineCount(match[4]),
         content: "",
       };
     } else if (currentHunk) {
@@ -200,30 +210,52 @@ async function buildChangedFunctions(
     getFileAtCommit(headSha, filePath, cwd),
   ]);
 
-  if (!(parentSource && childSource)) {
+  if (!childSource) {
     return [];
   }
 
-  const functionRegex = /(?:export\s+)?(?:async\s+)?function\s+(\w+)/g;
-  const functions: ChangedFunction[] = [];
+  const parentText = parentSource ?? "";
+  const childText = childSource;
+  const analysis = analyzeFileChanges(parentText, childText, filePath);
+  const parentFunctions = new Map(
+    extractFunctions(analyzeSourceFile(filePath, parentText)).map((fn) => [
+      fn.name,
+      fn,
+    ]),
+  );
+  const childFunctions = new Map(
+    extractFunctions(analyzeSourceFile(filePath, childText)).map((fn) => [
+      fn.name,
+      fn,
+    ]),
+  );
 
-  let match = functionRegex.exec(parentSource);
-  while (match) {
-    const fnName = match[1] ?? "unknown";
-    functions.push({
-      name: fnName,
+  return analysis.modifiedFunctions.map((fn) => {
+    const parentMatch = parentFunctions.get(fn.name);
+    const childMatch = childFunctions.get(fn.name) ?? fn;
+
+    return {
+      name: fn.name,
       filePath,
-      parentSource,
-      childSource,
+      parentSource: parentMatch?.body ?? "",
+      childSource: childMatch.body,
+      parentFileSource: parentText,
+      childFileSource: childText,
       hunks: [...hunks],
-      signature: match[0],
+      signature: childMatch.signature,
       requiredImports: [],
       hasCoverage: false,
-    });
-    match = functionRegex.exec(parentSource);
-  }
+    };
+  });
+}
 
-  return functions;
+function analyzeSourceFile(filePath: string, sourceText: string) {
+  return ts.createSourceFile(
+    filePath,
+    sourceText,
+    ts.ScriptTarget.Latest,
+    true,
+  );
 }
 
 function extractChangedSymbols(
@@ -245,7 +277,7 @@ function extractChangedSymbols(
         const isExported = line.includes("export");
         let exportType: ChangedSymbol["exportType"] = "internal";
         if (isExported) {
-          exportType = line.includes("default") ? "default" : "named";
+          exportType = line.includes("export default ") ? "default" : "named";
         }
         symbols.push({
           name: match[1],
@@ -327,13 +359,15 @@ function extractDiffContext(options: {
   baseRef: string;
   headRef: string;
   cwd: string;
+  prTitle?: string;
+  prBody?: string;
 }): Promise<DiffContext> {
   return extractDiff(
     options.baseRef,
     options.headRef,
     {
-      title: "",
-      body: "",
+      title: options.prTitle ?? "",
+      body: options.prBody ?? "",
       branch: options.headRef,
       baseSha: options.baseRef,
       headSha: options.headRef,

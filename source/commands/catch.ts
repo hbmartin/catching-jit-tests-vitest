@@ -82,6 +82,8 @@ const loadDiffWithRisk = async (
     baseRef: options.base,
     headRef: options.head,
     cwd: options.cwd,
+    prTitle: options.prTitle,
+    prBody: options.prBody,
   });
 
   return {
@@ -242,7 +244,7 @@ const assessWeakCatches = async (input: {
     const assessment = await assessWeakCatch(
       weakCatch,
       input.diff,
-      weakCatch.childResult.failureMessage,
+      weakCatch.executionLog ?? weakCatch.childResult.failureMessage,
       input.llm,
       input.config,
     );

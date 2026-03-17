@@ -12,6 +12,11 @@ import { CommandError, runCommand } from "../utils/process.js";
 import { parseVitestJsonOutput } from "./result-parser.js";
 import type { DualExecutionResult, TestResult } from "./types.js";
 
+interface VitestRunResult {
+  readonly results: readonly TestResult[];
+  readonly executionLog: string;
+}
+
 async function writeTestFile(
   projectDir: string,
   test: GeneratedTest,
@@ -39,7 +44,7 @@ async function runVitest(
   projectDir: string,
   testFiles: readonly GeneratedTest[],
   timeout: number,
-): Promise<TestResult[]> {
+): Promise<VitestRunResult> {
   await Promise.all(testFiles.map((test) => writeTestFile(projectDir, test)));
 
   try {
@@ -64,27 +69,44 @@ async function runVitest(
       },
     );
 
-    return parseVitestJsonOutput(result.stdout);
+    return {
+      results: parseVitestJsonOutput(result.stdout),
+      executionLog: [result.stdout, result.stderr].filter(Boolean).join("\n"),
+    };
   } catch (err: unknown) {
     if (err instanceof CommandError && err.stdout.length > 0) {
       try {
-        return parseVitestJsonOutput(err.stdout);
+        return {
+          results: parseVitestJsonOutput(err.stdout),
+          executionLog: [err.stdout, err.stderr].filter(Boolean).join("\n"),
+        };
       } catch {
         logger.error("Failed to parse Vitest output from error");
       }
     }
 
     logger.error("Vitest execution failed");
-    return testFiles.map((test) =>
-      testResultSchema.parse({
-        testFile: test.testFilePath,
-        testName: test.behaviorDescription,
-        status: "failed" as const,
-        failureMessage: "Vitest execution failed",
-        duration: 0,
-        failureAnalysis: null,
-      }),
-    );
+    let errorLog: string;
+    if (err instanceof CommandError) {
+      errorLog = [err.stdout, err.stderr].filter(Boolean).join("\n");
+    } else if (err instanceof Error) {
+      errorLog = err.message;
+    } else {
+      errorLog = String(err);
+    }
+    return {
+      results: testFiles.map((test) =>
+        testResultSchema.parse({
+          testFile: test.testFilePath,
+          testName: test.behaviorDescription,
+          status: "failed" as const,
+          failureMessage: "Vitest execution failed",
+          duration: 0,
+          failureAnalysis: null,
+        }),
+      ),
+      executionLog: errorLog,
+    };
   } finally {
     await Promise.all(
       testFiles.map((test) => removeTestFile(projectDir, test)),
@@ -126,8 +148,12 @@ async function dualExecution(
       .map((currentTest, i) =>
         dualExecutionResultSchema.parse({
           test: currentTest,
-          parentOutcome: parentResults[i] ?? buildDefaultOutcome(currentTest),
-          childOutcome: childResults[i] ?? buildDefaultOutcome(currentTest),
+          parentOutcome:
+            parentResults.results[i] ?? buildDefaultOutcome(currentTest),
+          childOutcome:
+            childResults.results[i] ?? buildDefaultOutcome(currentTest),
+          parentExecutionLog: parentResults.executionLog,
+          childExecutionLog: childResults.executionLog,
         }),
       );
 

@@ -34,6 +34,23 @@ function goodbye() { return "bye"; }`;
     expect(functions[0]?.name).toBe("greet");
   });
 
+  it("qualifies class method names", () => {
+    const source = `class UserService {
+  findById(id: string) {
+    return id;
+  }
+}`;
+    const sf = ts.createSourceFile(
+      "test.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const functions = extractFunctions(sf);
+
+    expect(functions[0]?.name).toBe("UserService.findById");
+  });
+
   it("returns empty for files without functions", () => {
     const source = `const x = 42;
 type Foo = string;`;
@@ -78,6 +95,14 @@ export function bar() {}`;
 
     const analysis = analyzeFileChanges(parent, child, "file.ts");
     expect(analysis.removedExports).toContain("bar");
+  });
+
+  it("tracks default export changes", () => {
+    const parent = "export default function foo() {}";
+    const child = "function foo() {}";
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    expect(analysis.removedExports).toContain("default");
   });
 
   it("detects control flow changes", () => {

@@ -22,9 +22,9 @@ async function dodgyDiffWorkflow(
 
       const candidates = await synthesizeMultipleTests(
         {
-          targetSource: fn.parentSource,
+          targetSource: fn.parentSource || fn.childSource,
           targetPath: file.path,
-          fullFileSource: fn.childSource,
+          fullFileSource: fn.childFileSource,
           existingTests: null,
           targetBehavior: {
             kind: "mutant",
@@ -36,6 +36,9 @@ async function dodgyDiffWorkflow(
             tsConfigPath: null,
             packageJsonPath: null,
           },
+          targetSymbol: fn.name,
+          workflow: "dodgy-diff",
+          candidateKey: `${file.path}:${fn.name}:${fn.signature}`,
         },
         llm,
         config.testsPerFunction,
@@ -44,7 +47,6 @@ async function dodgyDiffWorkflow(
       const taggedCandidates = candidates.map((c) => ({
         ...c,
         workflow: "dodgy-diff" as const,
-        targetSymbol: fn.name,
       }));
 
       tests.push(...taggedCandidates);

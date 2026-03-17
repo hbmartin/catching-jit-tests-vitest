@@ -53,15 +53,18 @@ async function ensembleJudge(
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<Assessment> {
-  const modelCount = config.judgeModels.length;
-  const judgments: JudgeOutput[] = [];
+  const models =
+    config.judgeModels.length > 0 ? config.judgeModels : [config.llm.model];
+  const judgments = await Promise.all(
+    models.map(async (model) => ({
+      model,
+      judgment: await singleModelJudge(input, llm.withModel(model)),
+    })),
+  );
 
-  for (let i = 0; i < modelCount; i += 1) {
-    const judgment = await singleModelJudge(input, llm);
-    judgments.push(judgment);
-  }
-
-  const scores = judgments.map((j) => computeJudgmentScore(j));
+  const scores = judgments.map(({ judgment }) =>
+    computeJudgmentScore(judgment),
+  );
   const sorted = [...scores].sort((a, b) => a - b);
   const medianScore = sorted[Math.floor(sorted.length / 2)] ?? 0;
 
@@ -69,8 +72,8 @@ async function ensembleJudge(
     score: medianScore,
     rationale: judgments
       .map(
-        (j, i) =>
-          `[model-${String(i)}] ${j.isUnexpectedBug ? "BUG" : "INTENDED"} (${j.confidence}): ${j.explanation}`,
+        ({ model, judgment }) =>
+          `[${model}] ${judgment.isUnexpectedBug ? "BUG" : "INTENDED"} (${judgment.confidence}): ${judgment.explanation}`,
       )
       .join("\n"),
     detectedPatterns: [],

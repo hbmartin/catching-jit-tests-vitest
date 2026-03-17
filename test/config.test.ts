@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import {
   createDefaultConfig,
@@ -22,6 +22,12 @@ describe("createDefaultConfig", () => {
 });
 
 describe("loadConfig", () => {
+  const originalApiKey = process.env.ANTHROPIC_API_KEY;
+
+  afterEach(() => {
+    process.env.ANTHROPIC_API_KEY = originalApiKey;
+  });
+
   it("applies overrides to default config", () => {
     const config = loadConfig({
       testsPerFunction: 5,
@@ -39,6 +45,19 @@ describe("loadConfig", () => {
     });
     expect(config.maxTotalTests).toBe(50);
     expect(config.rubfakeEnabled).toBe(true);
+  });
+
+  it("merges nested llm overrides without dropping the api key", () => {
+    process.env.ANTHROPIC_API_KEY = "test-api-key";
+
+    const config = loadConfig({
+      llm: {
+        model: "custom-model",
+      },
+    });
+
+    expect(config.llm.model).toBe("custom-model");
+    expect(config.llm.apiKey).toBe("test-api-key");
   });
 });
 

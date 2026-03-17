@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assessmentBundleSchema,
   reportCommandResultSchema,
+  testResultSchema,
   weakCatchBundleSchema,
 } from "../source/runtime-schemas.js";
 
@@ -110,5 +111,18 @@ describe("runtime schemas", () => {
     };
 
     expect(reportCommandResultSchema.parse(result)).toEqual(result);
+  });
+
+  it("accepts skipped test statuses", () => {
+    expect(
+      testResultSchema.parse({
+        testFile: "test/example.test.ts",
+        testName: "skips cleanly",
+        status: "skipped",
+        failureMessage: "",
+        duration: 0,
+        failureAnalysis: null,
+      }),
+    ).toMatchObject({ status: "skipped" });
   });
 });
