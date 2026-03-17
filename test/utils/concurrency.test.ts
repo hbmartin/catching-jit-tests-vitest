@@ -1,0 +1,38 @@
+import { describe, expect, it } from "vitest";
+
+import { chunk, mapConcurrent } from "../../source/utils/concurrency.js";
+
+describe("chunk", () => {
+  it("splits array into chunks of given size", () => {
+    const result = chunk([1, 2, 3, 4, 5], 2);
+    expect(result).toEqual([[1, 2], [3, 4], [5]]);
+  });
+
+  it("handles empty array", () => {
+    const result = chunk([], 3);
+    expect(result).toEqual([]);
+  });
+
+  it("handles chunk size larger than array", () => {
+    const result = chunk([1, 2], 5);
+    expect(result).toEqual([[1, 2]]);
+  });
+
+  it("handles chunk size of 1", () => {
+    const result = chunk([1, 2, 3], 1);
+    expect(result).toEqual([[1], [2], [3]]);
+  });
+});
+
+describe("mapConcurrent", () => {
+  it("processes items with given concurrency", async () => {
+    const items = [1, 2, 3, 4];
+    const results = await mapConcurrent(items, 2, async (x) => x * 2);
+    expect(results).toEqual([2, 4, 6, 8]);
+  });
+
+  it("handles empty array", async () => {
+    const results = await mapConcurrent([], 5, async (x: number) => x);
+    expect(results).toEqual([]);
+  });
+});
