@@ -1,0 +1,59 @@
+{
+  "bugs": {
+    "url": "https://github.com/hbmartin/catching-jit-tests-vitest/issues"
+  },
+  "homepage": "https://github.com/hbmartin/catching-jit-tests-vitest#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hbmartin/catching-jit-tests-vitest.git"
+  },
+  "author": "Harold Martin <harold.martin@gmail.com>",
+  "dependencies": {
+    "meow": "^14.0.0",
+    "zod": "^4.3.6"
+  },
+  "description": "For every PR/diff, you need to: generate tests against the parent branch that pass, run those same tests against the PR branch, and harvest the ones that now fail (\"weak catches\"). The hard part is everything around that — making the test generation diff-aware, and then filtering false positives so engineers don't ignore the signal.",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "catching-jit-tests-vitest": "dist/cli.js"
+  },
+  "license": "MIT",
+  "name": "catching-jit-tests-vitest",
+  "resolutions": {
+    "@types/node": "^22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "dev": "tsc --watch",
+    "format": "biome check --write",
+    "lint": "biome check --error-on-warnings",
+    "prepare": "husky",
+    "test": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.1.0",
+  "devDependencies": {
+    "@biomejs/biome": "^2.3.15",
+    "@commitlint/cli": "^20.4.1",
+    "@commitlint/config-conventional": "^20.4.1",
+    "@sindresorhus/tsconfig": "^8.1.0",
+    "@types/node": "^22",
+    "@vitest/coverage-istanbul": "^4.0.18",
+    "husky": "^9.1.7",
+    "publint": "^0.3.17",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.18"
+  }
+}
