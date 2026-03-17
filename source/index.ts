@@ -6,10 +6,21 @@ export type {
   JudgeOutput,
 } from "./assessors/types.js";
 export type { JiTTestConfig } from "./config.js";
-export { createDefaultConfig, loadConfig } from "./config.js";
+export {
+  createDefaultConfig,
+  loadConfig,
+  outputFormatSchema,
+  parseCatchCommandOptions,
+  workflowSchema,
+} from "./config.js";
 export { analyzeFileChanges } from "./diff/ast-analyzer.js";
-export { extractDiff } from "./diff/extractor.js";
-export { computeRiskFactors, computeRiskScore } from "./diff/risk-scorer.js";
+export { extractDiff, extractDiffContext } from "./diff/extractor.js";
+export {
+  applyRiskAnalysis,
+  computeRiskAnalysis,
+  computeRiskFactors,
+  computeRiskScore,
+} from "./diff/risk-scorer.js";
 export type {
   ASTAnalysis,
   ChangedFile,
@@ -38,12 +49,34 @@ export type {
   WeakCatch,
 } from "./harvest/types.js";
 export { generateBehaviorReport } from "./reporting/behavior-change.js";
+export {
+  formatAssessmentRecords,
+  formatBehaviorReports,
+  formatCatchResult,
+} from "./reporting/console.js";
 export { formatPRComment } from "./reporting/github-comment.js";
 export { formatJsonReport } from "./reporting/json-report.js";
 export type {
   BehaviorReport,
   RunStats,
 } from "./reporting/types.js";
+export {
+  aggregatedAssessmentSchema,
+  behaviorChangeSchema,
+  behaviorReportSchema,
+  dualExecutionResultSchema,
+  failureAnalysisSchema,
+  generatedTestSchema,
+  inferRisksResponseSchema,
+  inferredRiskSchema,
+  reportCommandResultSchema,
+  runStatsSchema,
+  testResultSchema,
+  vitestJsonOutputSchema,
+  weakCatchBundleSchema,
+  weakCatchSchema,
+} from "./runtime-schemas.js";
 export type { BrandedId } from "./types/index.js";
 export { formatValue } from "./utils/formatting.js";
 export { LLMClient } from "./utils/llm-client.js";
+export { CommandError, runCommand } from "./utils/process.js";

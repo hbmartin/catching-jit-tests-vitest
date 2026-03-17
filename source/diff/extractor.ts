@@ -1,5 +1,7 @@
-import { execSync } from "node:child_process";
+import { access } from "node:fs/promises";
 import path from "node:path";
+
+import { CommandError, runCommand } from "../utils/process.js";
 
 import type {
   ChangedFile,
@@ -50,20 +52,24 @@ function parseHunks(diffText: string): DiffHunk[] {
   return hunks;
 }
 
-function execGit(command: string, cwd?: string): string {
-  return execSync(command, {
+async function execGit(args: readonly string[], cwd?: string): Promise<string> {
+  const result = await runCommand("git", args, {
     cwd,
-    encoding: "utf-8",
     maxBuffer: 10 * 1024 * 1024,
-  }).trim();
+  });
+
+  return result.stdout.trimEnd();
 }
 
-function getChangedFilePaths(
+async function getChangedFilePaths(
   baseSha: string,
   headSha: string,
   cwd?: string,
-): string[] {
-  const output = execGit(`git diff --name-only ${baseSha}...${headSha}`, cwd);
+): Promise<string[]> {
+  const output = await execGit(
+    ["diff", "--name-only", `${baseSha}...${headSha}`],
+    cwd,
+  );
   if (output.length === 0) {
     return [];
   }
@@ -75,23 +81,39 @@ function getFileDiff(
   headSha: string,
   filePath: string,
   cwd?: string,
-): string {
-  return execGit(`git diff ${baseSha}...${headSha} -- ${filePath}`, cwd);
+): Promise<string> {
+  return execGit(["diff", `${baseSha}...${headSha}`, "--", filePath], cwd);
 }
 
-function getFileAtCommit(
+async function getFileAtCommit(
   sha: string,
   filePath: string,
   cwd?: string,
-): string | null {
+): Promise<string | null> {
   try {
-    return execGit(`git show ${sha}:${filePath}`, cwd);
-  } catch {
-    return null;
+    return await execGit(["show", `${sha}:${filePath}`], cwd);
+  } catch (error) {
+    if (error instanceof CommandError) {
+      return null;
+    }
+
+    throw error;
   }
 }
 
-function findExistingTestFile(filePath: string, cwd?: string): string | null {
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findExistingTestFile(
+  filePath: string,
+  cwd = ".",
+): Promise<string | null> {
   const { dir, name } = path.parse(filePath);
   const candidates = [
     path.join(dir, `${name}.test.ts`),
@@ -101,14 +123,8 @@ function findExistingTestFile(filePath: string, cwd?: string): string | null {
   ];
 
   for (const candidate of candidates) {
-    try {
-      const resolvedCwd = cwd ?? ".";
-      execSync(`test -f ${path.join(resolvedCwd, candidate)}`, {
-        encoding: "utf-8",
-      });
+    if (await fileExists(path.join(cwd, candidate))) {
       return candidate;
-    } catch {
-      // File doesn't exist, try next candidate
     }
   }
 
@@ -172,15 +188,17 @@ function detectSensitivity(
   };
 }
 
-function buildChangedFunctions(
+async function buildChangedFunctions(
   filePath: string,
   baseSha: string,
   headSha: string,
   hunks: readonly DiffHunk[],
   cwd?: string,
-): ChangedFunction[] {
-  const parentSource = getFileAtCommit(baseSha, filePath, cwd);
-  const childSource = getFileAtCommit(headSha, filePath, cwd);
+): Promise<ChangedFunction[]> {
+  const [parentSource, childSource] = await Promise.all([
+    getFileAtCommit(baseSha, filePath, cwd),
+    getFileAtCommit(headSha, filePath, cwd),
+  ]);
 
   if (!(parentSource && childSource)) {
     return [];
@@ -242,15 +260,15 @@ function extractChangedSymbols(
   return symbols;
 }
 
-function extractDiff(
+async function extractDiff(
   baseSha: string,
   headSha: string,
   prMeta: DiffContext["pr"],
   cwd?: string,
-): DiffContext {
-  const rawDiff = execGit(`git diff ${baseSha}...${headSha}`, cwd);
+): Promise<DiffContext> {
+  const rawDiff = await execGit(["diff", `${baseSha}...${headSha}`], cwd);
 
-  const changedPaths = getChangedFilePaths(baseSha, headSha, cwd);
+  const changedPaths = await getChangedFilePaths(baseSha, headSha, cwd);
   const tsFiles = changedPaths.filter(
     (f) =>
       f.endsWith(".ts") &&
@@ -259,47 +277,76 @@ function extractDiff(
       !f.includes("node_modules"),
   );
 
-  const allSymbols: ChangedSymbol[] = [];
-  const files: ChangedFile[] = tsFiles.map((filePath) => {
-    const fileDiff = getFileDiff(baseSha, headSha, filePath, cwd);
-    const hunks = parseHunks(fileDiff);
-    const sensitivity = detectSensitivity(filePath, fileDiff);
-    const symbols = extractChangedSymbols(filePath, fileDiff);
-    allSymbols.push(...symbols);
+  const parsedFiles = await Promise.all(
+    tsFiles.map(async (filePath) => {
+      const fileDiff = await getFileDiff(baseSha, headSha, filePath, cwd);
+      const hunks = parseHunks(fileDiff);
+      const sensitivity = detectSensitivity(filePath, fileDiff);
+      const symbols = extractChangedSymbols(filePath, fileDiff);
+      const [existingTestFile, changedFunctions] = await Promise.all([
+        findExistingTestFile(filePath, cwd ?? "."),
+        buildChangedFunctions(filePath, baseSha, headSha, hunks, cwd),
+      ]);
 
-    const changedFunctions = buildChangedFunctions(
-      filePath,
-      baseSha,
-      headSha,
-      hunks,
-      cwd,
-    );
+      return {
+        file: {
+          path: filePath,
+          hunks,
+          existingTestFile,
+          changedExports: symbols
+            .filter((s) => s.exportType !== "internal")
+            .map((s) => s.name),
+          changedFunctions,
+          ...sensitivity,
+        } satisfies ChangedFile,
+        symbols,
+      };
+    }),
+  );
 
-    return {
-      path: filePath,
-      hunks,
-      existingTestFile: findExistingTestFile(filePath, cwd),
-      changedExports: symbols
-        .filter((s) => s.exportType !== "internal")
-        .map((s) => s.name),
-      changedFunctions,
-      ...sensitivity,
-    };
-  });
+  const files = parsedFiles.map((entry) => entry.file);
+  const allSymbols = parsedFiles.flatMap((entry) => entry.symbols);
 
   return {
     rawDiff,
     pr: prMeta,
     files,
     riskScore: 0,
+    riskFactors: {
+      sensitivityScore: 0,
+      complexityScore: 0,
+      coverageGap: 0,
+      defectHistory: 0,
+    },
+    riskReasons: [],
     changedSymbols: allSymbols,
   };
+}
+
+function extractDiffContext(options: {
+  baseRef: string;
+  headRef: string;
+  cwd: string;
+}): Promise<DiffContext> {
+  return extractDiff(
+    options.baseRef,
+    options.headRef,
+    {
+      title: "",
+      body: "",
+      branch: options.headRef,
+      baseSha: options.baseRef,
+      headSha: options.headRef,
+    },
+    options.cwd,
+  );
 }
 
 export {
   execGit,
   extractChangedSymbols,
   extractDiff,
+  extractDiffContext,
   findExistingTestFile,
   getChangedFilePaths,
   getFileAtCommit,

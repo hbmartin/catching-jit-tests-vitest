@@ -1,11 +1,10 @@
 import { describe, expect, it } from "vitest";
-
+import type { DualExecutionResult } from "../../source/execution/types.js";
 import {
   describeBehaviorChange,
   harvestWeakCatches,
   isBooleanPair,
 } from "../../source/harvest/harvester.js";
-import type { DualExecutionResult } from "../../source/execution/types.js";
 
 describe("isBooleanPair", () => {
   it("returns true for true/false pair", () => {
@@ -57,16 +56,17 @@ function makeDualResult(
       status: childStatus,
       failureMessage: childStatus === "failed" ? "Child failure" : "",
       duration: 100,
-      failureAnalysis: childStatus === "failed"
-        ? {
-            assertionType: "toBe",
-            expected: "true",
-            actual: "false",
-            stackTrace: "",
-            isRuntimeError: false,
-            errorClass: null,
-          }
-        : null,
+      failureAnalysis:
+        childStatus === "failed"
+          ? {
+              assertionType: "toBe",
+              expected: "true",
+              actual: "false",
+              stackTrace: "",
+              isRuntimeError: false,
+              errorClass: null,
+            }
+          : null,
     },
   };
 }
@@ -118,6 +118,8 @@ describe("describeBehaviorChange", () => {
 
     const change = describeBehaviorChange(result);
     expect(change.changeType).toBe("other");
-    expect(change.summary).toBe("Test behavior changed between parent and child");
+    expect(change.summary).toBe(
+      "Test behavior changed between parent and child",
+    );
   });
 });

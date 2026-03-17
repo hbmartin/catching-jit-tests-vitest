@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-
-import { buildSenseCheck } from "../../source/reporting/behavior-change.js";
 import type { WeakCatch } from "../../source/harvest/types.js";
+import { buildSenseCheck } from "../../source/reporting/behavior-change.js";
 
 function makeWeakCatch(
   changeType: WeakCatch["behaviorChange"]["changeType"],
@@ -58,7 +57,9 @@ describe("buildSenseCheck", () => {
   });
 
   it("generates return-value-changed message", () => {
-    const msg = buildSenseCheck(makeWeakCatch("return-value-changed", "42", "0"));
+    const msg = buildSenseCheck(
+      makeWeakCatch("return-value-changed", "42", "0"),
+    );
     expect(msg).toContain("42");
     expect(msg).toContain("0");
   });

@@ -1,33 +1,94 @@
-import type { DiffContext, RiskFactors } from "./types.js";
+import { runCommand } from "../utils/process.js";
+import type { ChangedFile, DiffContext, RiskFactors } from "./types.js";
+
+interface RiskAnalysis {
+  score: number;
+  factors: RiskFactors;
+  reasons: string[];
+}
 
 const sensitivityPatterns: ReadonlyArray<{
+  label: string;
   pattern: RegExp;
   weight: number;
 }> = [
-  { pattern: /auth|login|session|token|jwt|oauth/i, weight: 0.9 },
-  { pattern: /payment|billing|charge|stripe|subscription/i, weight: 0.95 },
-  { pattern: /permission|role|rbac|acl|access/i, weight: 0.85 },
-  { pattern: /encrypt|decrypt|hash|secret|credential/i, weight: 0.9 },
-  { pattern: /database|migration|schema|model/i, weight: 0.7 },
-  { pattern: /api\/|route|endpoint|middleware/i, weight: 0.6 },
-  { pattern: /config|env|setting/i, weight: 0.5 },
-  { pattern: /util|helper|lib/i, weight: 0.3 },
-  { pattern: /test|spec|mock|fixture/i, weight: 0.1 },
+  {
+    label: "payments",
+    pattern: /payment|billing|charge|stripe|subscription/i,
+    weight: 0.95,
+  },
+  {
+    label: "auth",
+    pattern: /auth|login|session|token|jwt|oauth/i,
+    weight: 0.9,
+  },
+  {
+    label: "access-control",
+    pattern: /permission|role|rbac|acl|access/i,
+    weight: 0.85,
+  },
+  {
+    label: "secrets",
+    pattern: /encrypt|decrypt|hash|secret|credential/i,
+    weight: 0.9,
+  },
+  {
+    label: "data-model",
+    pattern: /database|migration|schema|model/i,
+    weight: 0.7,
+  },
+  { label: "api", pattern: /api\/|route|endpoint|middleware/i, weight: 0.6 },
+  { label: "config", pattern: /config|env|setting/i, weight: 0.5 },
+  { label: "utility", pattern: /util|helper|lib/i, weight: 0.3 },
+  { label: "tests", pattern: /test|spec|mock|fixture/i, weight: 0.1 },
 ];
 
-function computeSensitivityScore(diff: DiffContext): number {
+const clampScore = (value: number): number => Math.max(0, Math.min(1, value));
+
+const matchesSensitivityLabel = (diff: DiffContext, label: string): boolean =>
+  diff.files.some((file) => {
+    const combined = `${file.path}\n${diff.rawDiff}`;
+
+    return sensitivityPatterns.some(
+      (pattern) => pattern.label === label && pattern.pattern.test(combined),
+    );
+  });
+
+const calculateSensitivityScore = (diff: DiffContext): number => {
+  if (diff.files.length === 0) {
+    return 0;
+  }
+
   let maxWeight = 0;
 
   for (const file of diff.files) {
+    if (file.touchesPayments) {
+      maxWeight = Math.max(maxWeight, 0.95);
+    }
+
+    if (file.touchesAuth) {
+      maxWeight = Math.max(maxWeight, 0.9);
+    }
+
+    if (file.touchesAccessControl) {
+      maxWeight = Math.max(maxWeight, 0.85);
+    }
+
+    if (file.touchesDataModel) {
+      maxWeight = Math.max(maxWeight, 0.7);
+    }
+
+    const combined = `${file.path}\n${diff.rawDiff}`;
+
     for (const { pattern, weight } of sensitivityPatterns) {
-      if (pattern.test(file.path) || pattern.test(diff.rawDiff)) {
+      if (pattern.test(combined)) {
         maxWeight = Math.max(maxWeight, weight);
       }
     }
   }
 
-  return maxWeight;
-}
+  return clampScore(maxWeight);
+};
 
 function computeComplexityScore(diff: DiffContext): number {
   const totalHunks = diff.files.reduce((sum, f) => sum + f.hunks.length, 0);
@@ -44,7 +105,7 @@ function computeComplexityScore(diff: DiffContext): number {
     .filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
   const churnScore = Math.min((addedLines + removedLines) / 200, 1);
 
-  return hunkScore * 0.3 + fileScore * 0.3 + churnScore * 0.4;
+  return clampScore(hunkScore * 0.3 + fileScore * 0.3 + churnScore * 0.4);
 }
 
 function computeCoverageGap(diff: DiffContext): number {
@@ -56,27 +117,161 @@ function computeCoverageGap(diff: DiffContext): number {
     (f) => f.existingTestFile === null,
   ).length;
 
-  return uncoveredCount / diff.files.length;
+  return clampScore(uncoveredCount / diff.files.length);
 }
 
 function computeRiskFactors(diff: DiffContext): RiskFactors {
   return {
-    sensitivityScore: computeSensitivityScore(diff),
+    sensitivityScore: calculateSensitivityScore(diff),
     complexityScore: computeComplexityScore(diff),
     coverageGap: computeCoverageGap(diff),
-    defectHistory: 0,
+    defectHistory: diff.riskFactors?.defectHistory ?? 0,
   };
 }
 
-function computeRiskScore(diff: DiffContext): number {
-  const factors = computeRiskFactors(diff);
+const readHistoryTouches = async (
+  repoRoot: string,
+  filePath: string,
+): Promise<number> => {
+  try {
+    const result = await runCommand(
+      "git",
+      ["rev-list", "--count", "HEAD", "--", filePath],
+      { cwd: repoRoot },
+    );
+    const count = Number.parseInt(result.stdout.trim(), 10);
 
-  return (
+    if (Number.isNaN(count)) {
+      return 0;
+    }
+
+    return count;
+  } catch {
+    return 0;
+  }
+};
+
+const calculateDefectHistory = async (
+  repoRoot: string,
+  files: readonly ChangedFile[],
+): Promise<number> => {
+  if (files.length === 0) {
+    return 0;
+  }
+
+  const touchCounts = await Promise.all(
+    files.map((file) => readHistoryTouches(repoRoot, file.path)),
+  );
+  const totalTouches = touchCounts.reduce((sum, count) => sum + count, 0);
+
+  return clampScore(totalTouches / files.length / 25);
+};
+
+const buildRiskReasons = (
+  diff: DiffContext,
+  factors: RiskFactors,
+): string[] => {
+  const reasons: string[] = [];
+
+  if (
+    diff.files.some((file) => file.touchesPayments) ||
+    matchesSensitivityLabel(diff, "payments")
+  ) {
+    reasons.push("Touches payment or billing flows.");
+  }
+
+  if (
+    diff.files.some((file) => file.touchesAuth) ||
+    matchesSensitivityLabel(diff, "auth")
+  ) {
+    reasons.push("Touches authentication or session logic.");
+  }
+
+  if (
+    diff.files.some((file) => file.touchesAccessControl) ||
+    matchesSensitivityLabel(diff, "access-control")
+  ) {
+    reasons.push("Touches authorization or access-control logic.");
+  }
+
+  if (
+    diff.files.some((file) => file.touchesDataModel) ||
+    matchesSensitivityLabel(diff, "data-model")
+  ) {
+    reasons.push("Touches schema or data-model logic.");
+  }
+
+  if (matchesSensitivityLabel(diff, "secrets")) {
+    reasons.push("Touches encryption, secrets, or credential handling.");
+  }
+
+  if (factors.coverageGap >= 0.5) {
+    reasons.push("A large portion of changed files do not have nearby tests.");
+  }
+
+  if (factors.complexityScore >= 0.5) {
+    reasons.push("The diff spans multiple hunks or a high line count.");
+  }
+
+  if (factors.defectHistory >= 0.5) {
+    reasons.push("The touched files have a high historical churn count.");
+  }
+
+  if (reasons.length === 0 && diff.files.length > 0) {
+    reasons.push("General code churn exceeds the low-risk baseline.");
+  }
+
+  return reasons;
+};
+
+function computeRiskScore(diff: DiffContext): number {
+  const factors = diff.riskFactors ?? computeRiskFactors(diff);
+
+  return clampScore(
     factors.sensitivityScore * 0.4 +
-    factors.complexityScore * 0.25 +
-    factors.coverageGap * 0.2 +
-    factors.defectHistory * 0.15
+      factors.complexityScore * 0.25 +
+      factors.coverageGap * 0.2 +
+      factors.defectHistory * 0.15,
   );
 }
 
-export { computeRiskFactors, computeRiskScore };
+const computeRiskAnalysis = async (
+  repoRoot: string,
+  diffContext: DiffContext,
+): Promise<RiskAnalysis> => {
+  const factors = {
+    ...computeRiskFactors(diffContext),
+    defectHistory: await calculateDefectHistory(repoRoot, diffContext.files),
+  };
+
+  return {
+    score: computeRiskScore({
+      ...diffContext,
+      riskFactors: factors,
+    }),
+    factors,
+    reasons: buildRiskReasons(diffContext, factors),
+  };
+};
+
+const applyRiskAnalysis = async (
+  repoRoot: string,
+  diffContext: DiffContext,
+): Promise<DiffContext> => {
+  const riskAnalysis = await computeRiskAnalysis(repoRoot, diffContext);
+
+  return {
+    ...diffContext,
+    riskScore: riskAnalysis.score,
+    riskFactors: riskAnalysis.factors,
+    riskReasons: riskAnalysis.reasons,
+  };
+};
+
+export type { RiskAnalysis };
+export {
+  applyRiskAnalysis,
+  computeRiskAnalysis,
+  computeRiskFactors,
+  computeRiskScore,
+};

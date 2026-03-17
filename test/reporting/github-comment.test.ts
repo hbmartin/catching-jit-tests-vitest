@@ -24,7 +24,7 @@ const defaultStats: RunStats = {
     intentAware: { generated: 4, weakCatches: 1 },
   },
   llmCallCount: 15,
-  estimatedTokens: 50000,
+  estimatedTokens: 50_000,
   estimatedCost: 0.25,
   diffRiskScore: 0.7,
 };
@@ -36,22 +36,24 @@ describe("formatPRComment", () => {
   });
 
   it("formats a single report correctly", () => {
-    const reports: BehaviorReport[] = [{
-      headline: "Boolean flipped in isActive",
-      senseCheck: "Is this expected?",
-      details: {
-        behaviorChange: {
-          summary: "Boolean flipped",
-          parentBehavior: "true",
-          childBehavior: "false",
-          changeType: "boolean-flipped",
+    const reports: BehaviorReport[] = [
+      {
+        headline: "Boolean flipped in isActive",
+        senseCheck: "Is this expected?",
+        details: {
+          behaviorChange: {
+            summary: "Boolean flipped",
+            parentBehavior: "true",
+            childBehavior: "false",
+            changeType: "boolean-flipped",
+          },
+          verdict: "strong-catch",
+          assessorRationales: ["Good catch"],
+          testCode: "expect(isActive()).toBe(true);",
+          dismissalEstimate: "~30 seconds",
         },
-        verdict: "strong-catch",
-        assessorRationales: ["Good catch"],
-        testCode: "expect(isActive()).toBe(true);",
-        dismissalEstimate: "~30 seconds",
       },
-    }];
+    ];
 
     const result = formatPRComment(reports, defaultStats);
     expect(result).toContain("JiTTest");
@@ -67,7 +69,12 @@ describe("formatPRComment", () => {
         headline: "Change 1",
         senseCheck: "Expected?",
         details: {
-          behaviorChange: { summary: "", parentBehavior: "", childBehavior: "", changeType: "other" },
+          behaviorChange: {
+            summary: "",
+            parentBehavior: "",
+            childBehavior: "",
+            changeType: "other",
+          },
           verdict: "strong-catch",
           assessorRationales: [],
           testCode: "",
@@ -78,7 +85,12 @@ describe("formatPRComment", () => {
         headline: "Change 2",
         senseCheck: "Expected?",
         details: {
-          behaviorChange: { summary: "", parentBehavior: "", childBehavior: "", changeType: "other" },
+          behaviorChange: {
+            summary: "",
+            parentBehavior: "",
+            childBehavior: "",
+            changeType: "other",
+          },
           verdict: "likely-strong",
           assessorRationales: [],
           testCode: "",

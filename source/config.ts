@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const workflowSchema = z.enum(["dodgy-diff", "intent-aware", "both"]);
+const outputFormatSchema = z.enum(["github-comment", "json", "console"]);
+
 const jitTestConfigSchema = z.object({
   llm: z.object({
     provider: z.enum(["anthropic"]).default("anthropic"),
@@ -11,16 +14,14 @@ const jitTestConfigSchema = z.object({
   riskThreshold: z.number().min(0).max(1).default(0),
   testsPerFunction: z.number().min(1).default(3),
   maxTotalTests: z.number().min(1).default(50),
-  workflow: z.enum(["dodgy-diff", "intent-aware", "both"]).default("both"),
+  workflow: workflowSchema.default("both"),
   testTimeout: z.number().default(30_000),
   batchSize: z.number().default(10),
   parallelWorktrees: z.boolean().default(true),
   reportThreshold: z.number().min(-1).max(1).default(0),
   rubfakeEnabled: z.boolean().default(true),
   llmJudgeEnabled: z.boolean().default(true),
-  outputFormat: z
-    .enum(["github-comment", "json", "console"])
-    .default("console"),
+  outputFormat: outputFormatSchema.default("console"),
   githubToken: z.string().optional(),
   prNumber: z.number().optional(),
   include: z.array(z.string()).default(["src/**/*.ts", "source/**/*.ts"]),
@@ -30,6 +31,22 @@ const jitTestConfigSchema = z.object({
 });
 
 type JiTTestConfig = z.infer<typeof jitTestConfigSchema>;
+type Workflow = z.infer<typeof workflowSchema>;
+type OutputFormat = z.infer<typeof outputFormatSchema>;
+
+const catchCommandOptionsSchema = z.object({
+  base: z.string().default("origin/main"),
+  head: z.string().default("HEAD"),
+  workflow: workflowSchema.default("both"),
+  riskThreshold: z.coerce.number().min(0).max(1).default(0),
+  testsPerFunction: z.coerce.number().int().min(1).default(3),
+  timeout: z.coerce.number().int().positive().default(30_000),
+  output: outputFormatSchema.default("console"),
+  reportThreshold: z.coerce.number().min(-1).max(1).default(0),
+  cwd: z.string().default("."),
+});
+
+type CatchCommandOptions = z.infer<typeof catchCommandOptionsSchema>;
 
 function getApiKey(): string {
   // biome-ignore lint/complexity/useLiteralKeys: env var access requires bracket notation
@@ -57,5 +74,16 @@ function loadConfig(overrides: Record<string, unknown> = {}): JiTTestConfig {
   return jitTestConfigSchema.parse(base);
 }
 
-export type { JiTTestConfig };
-export { createDefaultConfig, jitTestConfigSchema, loadConfig };
+const parseCatchCommandOptions = (input: unknown): CatchCommandOptions =>
+  catchCommandOptionsSchema.parse(input);
+
+export type { CatchCommandOptions, JiTTestConfig, OutputFormat, Workflow };
+export {
+  catchCommandOptionsSchema,
+  createDefaultConfig,
+  jitTestConfigSchema,
+  loadConfig,
+  outputFormatSchema,
+  parseCatchCommandOptions,
+  workflowSchema,
+};

@@ -1,6 +1,7 @@
 import type { JiTTestConfig } from "../config.js";
 import type { DiffContext } from "../diff/types.js";
 import type { WeakCatch } from "../harvest/types.js";
+import { aggregatedAssessmentSchema } from "../runtime-schemas.js";
 import type { LLMClient } from "../utils/llm-client.js";
 
 import { ensembleJudge } from "./llm-judge.js";
@@ -122,13 +123,13 @@ async function assessWeakCatch(
   };
   const reportThreshold = thresholdMap[dismissalDifficulty];
 
-  return {
+  return aggregatedAssessmentSchema.parse({
     assessments,
     combinedScore,
     verdict,
     shouldReport: combinedScore >= reportThreshold,
     dismissalDifficulty,
-  };
+  });
 }
 
 export { assessWeakCatch, estimateDismissalDifficulty, scoreToVerdict };

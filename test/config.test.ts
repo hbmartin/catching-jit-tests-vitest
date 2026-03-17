@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { createDefaultConfig, loadConfig } from "../source/config.js";
+import {
+  createDefaultConfig,
+  loadConfig,
+  parseCatchCommandOptions,
+} from "../source/config.js";
 
 describe("createDefaultConfig", () => {
   it("creates config with default values", () => {
@@ -35,5 +39,31 @@ describe("loadConfig", () => {
     });
     expect(config.maxTotalTests).toBe(50);
     expect(config.rubfakeEnabled).toBe(true);
+  });
+});
+
+describe("parseCatchCommandOptions", () => {
+  it("applies CLI defaults", () => {
+    const options = parseCatchCommandOptions({});
+
+    expect(options.base).toBe("origin/main");
+    expect(options.head).toBe("HEAD");
+    expect(options.workflow).toBe("both");
+    expect(options.output).toBe("console");
+    expect(options.cwd).toBe(".");
+  });
+
+  it("coerces numeric values", () => {
+    const options = parseCatchCommandOptions({
+      riskThreshold: "0.4",
+      testsPerFunction: "5",
+      timeout: "45000",
+      reportThreshold: "-0.2",
+    });
+
+    expect(options.riskThreshold).toBe(0.4);
+    expect(options.testsPerFunction).toBe(5);
+    expect(options.timeout).toBe(45_000);
+    expect(options.reportThreshold).toBe(-0.2);
   });
 });

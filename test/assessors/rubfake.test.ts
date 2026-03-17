@@ -60,12 +60,15 @@ function makeContext(overrides: Partial<RuleContext> = {}): RuleContext {
 describe("evaluateRubFake", () => {
   it("detects mock failures as false positives", () => {
     const ctx = makeContext({
-      executionLog: "Cannot spy the doSomething property because it is not a function",
+      executionLog:
+        "Cannot spy the doSomething property because it is not a function",
     });
 
     const result = evaluateRubFake(ctx);
     expect(result.score).toBeLessThan(0);
-    expect(result.detectedPatterns.some((p) => p.name === "broken_mock")).toBe(true);
+    expect(result.detectedPatterns.some((p) => p.name === "broken_mock")).toBe(
+      true,
+    );
   });
 
   it("detects infrastructure failures as false positives", () => {
@@ -75,7 +78,9 @@ describe("evaluateRubFake", () => {
 
     const result = evaluateRubFake(ctx);
     expect(result.score).toBeLessThan(0);
-    expect(result.detectedPatterns.some((p) => p.name === "infrastructure_failure")).toBe(true);
+    expect(
+      result.detectedPatterns.some((p) => p.name === "infrastructure_failure"),
+    ).toBe(true);
   });
 
   it("detects heavy mocking as false positive signal", () => {
@@ -91,22 +96,34 @@ describe("evaluateRubFake", () => {
     });
 
     const result = evaluateRubFake(ctx);
-    expect(result.detectedPatterns.some((p) => p.name === "broken_mock")).toBe(true);
+    expect(result.detectedPatterns.some((p) => p.name === "broken_mock")).toBe(
+      true,
+    );
   });
 
   it("detects boolean flip as true positive", () => {
     const ctx = makeContext();
 
     const result = evaluateRubFake(ctx);
-    expect(result.detectedPatterns.some((p) => p.name === "changed_bool")).toBe(true);
-    expect(result.detectedPatterns.some((p) => p.direction === "true-positive")).toBe(true);
+    expect(result.detectedPatterns.some((p) => p.name === "changed_bool")).toBe(
+      true,
+    );
+    expect(
+      result.detectedPatterns.some((p) => p.direction === "true-positive"),
+    ).toBe(true);
   });
 
   it("detects refactor intent with behavior change as true positive", () => {
     const ctx = makeContext({
       diff: {
         rawDiff: "",
-        pr: { title: "Refactor user service", body: "Clean up code", branch: "", baseSha: "", headSha: "" },
+        pr: {
+          title: "Refactor user service",
+          body: "Clean up code",
+          branch: "",
+          baseSha: "",
+          headSha: "",
+        },
         files: [],
         riskScore: 0,
         changedSymbols: [],
@@ -114,7 +131,9 @@ describe("evaluateRubFake", () => {
     });
 
     const result = evaluateRubFake(ctx);
-    expect(result.detectedPatterns.some((p) => p.name === "refactor_intent")).toBe(true);
+    expect(
+      result.detectedPatterns.some((p) => p.name === "refactor_intent"),
+    ).toBe(true);
   });
 
   it("returns neutral score when no patterns match", () => {
