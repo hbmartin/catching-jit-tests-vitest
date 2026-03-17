@@ -1,0 +1,99 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  analyzeFileChanges,
+  extractFunctions,
+} from "../../source/diff/ast-analyzer.js";
+import ts from "typescript";
+
+describe("extractFunctions", () => {
+  it("extracts function declarations", () => {
+    const source = `function hello() { return "world"; }
+function goodbye() { return "bye"; }`;
+    const sf = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
+    const functions = extractFunctions(sf);
+    expect(functions).toHaveLength(2);
+    expect(functions[0]?.name).toBe("hello");
+    expect(functions[1]?.name).toBe("goodbye");
+  });
+
+  it("extracts arrow function declarations", () => {
+    const source = `const greet = (name: string) => \`Hello \${name}\`;`;
+    const sf = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
+    const functions = extractFunctions(sf);
+    expect(functions).toHaveLength(1);
+    expect(functions[0]?.name).toBe("greet");
+  });
+
+  it("returns empty for files without functions", () => {
+    const source = `const x = 42;
+type Foo = string;`;
+    const sf = ts.createSourceFile("test.ts", source, ts.ScriptTarget.Latest, true);
+    const functions = extractFunctions(sf);
+    expect(functions).toHaveLength(0);
+  });
+});
+
+describe("analyzeFileChanges", () => {
+  it("detects modified functions", () => {
+    const parent = `function calc(x: number): number {
+  return x * 2;
+}`;
+    const child = `function calc(x: number): number {
+  return x * 3;
+}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    expect(analysis.modifiedFunctions).toHaveLength(1);
+    expect(analysis.modifiedFunctions[0]?.name).toBe("calc");
+  });
+
+  it("detects added exports", () => {
+    const parent = `export function foo() {}`;
+    const child = `export function foo() {}
+export function bar() {}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    expect(analysis.addedExports).toContain("bar");
+  });
+
+  it("detects removed exports", () => {
+    const parent = `export function foo() {}
+export function bar() {}`;
+    const child = `export function foo() {}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    expect(analysis.removedExports).toContain("bar");
+  });
+
+  it("detects control flow changes", () => {
+    const parent = `function check(x: number) {
+  return x > 0;
+}`;
+    const child = `function check(x: number) {
+  if (x > 0) {
+    return true;
+  }
+  return false;
+}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    expect(analysis.controlFlowChanged).toBe(true);
+  });
+
+  it("detects error handling changes", () => {
+    const parent = `function risky() {
+  doSomething();
+}`;
+    const child = `function risky() {
+  try {
+    doSomething();
+  } catch (e) {
+    console.error(e);
+  }
+}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    expect(analysis.errorHandlingChanged).toBe(true);
+  });
+});

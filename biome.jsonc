@@ -380,6 +380,51 @@
           "style": {
             "noDefaultExport": "off",
             "noProcessEnv": "off"
+          },
+          "suspicious": {
+            "noConsole": "off"
+          },
+          "complexity": {
+            "noExcessiveCognitiveComplexity": "off",
+            "noExcessiveLinesPerFunction": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "source/config.ts",
+        "source/diff/**",
+        "source/execution/**",
+        "source/generation/**",
+        "source/harvest/**",
+        "source/assessors/**",
+        "source/reporting/**",
+        "source/prompts/**",
+        "source/utils/llm-client.ts",
+        "source/utils/logger.ts",
+        "source/utils/concurrency.ts"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off",
+            "noProcessGlobal": "off"
+          },
+          "style": {
+            "noProcessEnv": "off"
+          },
+          "suspicious": {
+            "noConsole": "off"
+          },
+          "complexity": {
+            "noExcessiveCognitiveComplexity": {
+              "level": "error",
+              "options": {
+                "maxAllowedComplexity": 40
+              }
+            },
+            "noExcessiveLinesPerFunction": "off"
           }
         }
       }
