@@ -96,4 +96,49 @@ describe("parseVitestJsonOutput", () => {
     expect(results[0]?.failureAnalysis?.expected).toBe("true");
     expect(results[0]?.failureAnalysis?.actual).toBe("false");
   });
+
+  it("normalizes pending todo and disabled assertions to skipped", () => {
+    const json = JSON.stringify({
+      testResults: [
+        {
+          name: "test/example.test.ts",
+          status: "pending",
+          assertionResults: [
+            {
+              ancestorTitles: ["suite"],
+              title: "pending case",
+              status: "pending",
+              failureMessages: [],
+              duration: 0,
+            },
+            {
+              ancestorTitles: ["suite"],
+              title: "todo case",
+              status: "todo",
+              failureMessages: [],
+              duration: 0,
+            },
+            {
+              ancestorTitles: ["suite"],
+              title: "disabled case",
+              status: "disabled",
+              failureMessages: [],
+              duration: 0,
+            },
+          ],
+        },
+      ],
+    });
+
+    const results = parseVitestJsonOutput(json);
+    expect(results).toHaveLength(3);
+    expect(results.map((result) => result.status)).toEqual([
+      "skipped",
+      "skipped",
+      "skipped",
+    ]);
+    expect(results.every((result) => result.failureAnalysis === null)).toBe(
+      true,
+    );
+  });
 });

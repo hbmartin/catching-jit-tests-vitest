@@ -47,7 +47,7 @@ export const formatCatchResult = (summary: CatchResultSummary): string => {
   }
 
   if (summary.reportsGenerated !== undefined) {
-    lines.push(`Reports: ${String(summary.reportsGenerated)}`);
+    lines.push(`Reports generated: ${String(summary.reportsGenerated)}`);
   }
 
   if (summary.duration !== undefined) {

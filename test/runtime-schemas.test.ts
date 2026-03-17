@@ -4,6 +4,7 @@ import {
   assessmentBundleSchema,
   reportCommandResultSchema,
   testResultSchema,
+  vitestJsonOutputSchema,
   weakCatchBundleSchema,
 } from "../source/runtime-schemas.js";
 
@@ -124,5 +125,34 @@ describe("runtime schemas", () => {
         failureAnalysis: null,
       }),
     ).toMatchObject({ status: "skipped" });
+  });
+
+  it("accepts non-binary Vitest reporter statuses", () => {
+    expect(
+      vitestJsonOutputSchema.parse({
+        testResults: [
+          {
+            name: "test/example.test.ts",
+            status: "pending",
+            assertionResults: [
+              {
+                ancestorTitles: ["suite"],
+                title: "todo item",
+                status: "todo",
+                failureMessages: [],
+                duration: 0,
+              },
+            ],
+          },
+        ],
+      }),
+    ).toMatchObject({
+      testResults: [
+        {
+          status: "pending",
+          assertionResults: [{ status: "todo" }],
+        },
+      ],
+    });
   });
 });

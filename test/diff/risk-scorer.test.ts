@@ -175,4 +175,23 @@ describe("computeRiskScore", () => {
     expect(score).toBeGreaterThan(0);
     expect(score).toBeLessThanOrEqual(1);
   });
+
+  it("renormalizes risk scoring when defect history is unavailable", () => {
+    const diff = makeDiffContext({
+      riskFactors: {
+        sensitivityScore: 0.8,
+        complexityScore: 0.6,
+        coverageGap: 0.5,
+        defectHistory: 0,
+      },
+    });
+
+    const scoreWithHistory = computeRiskScore(diff);
+    const scoreWithoutHistory = computeRiskScore(diff, {
+      defectHistoryAvailable: false,
+    });
+
+    expect(scoreWithoutHistory).toBeGreaterThan(scoreWithHistory);
+    expect(scoreWithoutHistory).toBeLessThanOrEqual(1);
+  });
 });

@@ -21,6 +21,7 @@ class CommandError extends Error {
   readonly stdout: string;
   readonly stderr: string;
   readonly exitCode: number | null;
+  readonly errorCode: string | null;
 
   constructor(
     message: string,
@@ -28,6 +29,7 @@ class CommandError extends Error {
       stdout: string;
       stderr: string;
       exitCode: number | null;
+      errorCode: string | null;
       cause: unknown;
     },
   ) {
@@ -36,6 +38,7 @@ class CommandError extends Error {
     this.stdout = options.stdout;
     this.stderr = options.stderr;
     this.exitCode = options.exitCode;
+    this.errorCode = options.errorCode;
   }
 }
 
@@ -74,18 +77,23 @@ export const runCommand = async (
     };
   } catch (error) {
     const failedResult = error as {
-      code?: number;
+      code?: number | string | null;
       stderr?: string | Buffer;
       stdout?: string | Buffer;
     };
 
     const stdout = failedResult.stdout?.toString() ?? "";
     const stderr = failedResult.stderr?.toString() ?? "";
+    const exitCode =
+      typeof failedResult.code === "number" ? failedResult.code : null;
+    const errorCode =
+      typeof failedResult.code === "string" ? failedResult.code : null;
 
     throw new CommandError(buildFailureMessage(command, args, stderr), {
       stdout,
       stderr,
-      exitCode: failedResult.code ?? null,
+      exitCode,
+      errorCode,
       cause: error,
     });
   }

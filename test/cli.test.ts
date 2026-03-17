@@ -9,6 +9,7 @@ vi.mock("../source/commands/catch.js", () => ({
 }));
 
 import { runCli } from "../source/cli.js";
+import { cliVersion } from "../source/version.js";
 
 describe("runCli", () => {
   beforeEach(() => {
@@ -29,7 +30,17 @@ describe("runCli", () => {
 
     await runCli(["--version"]);
 
-    expect(writeSpy).toHaveBeenCalledWith("0.1.0\n");
+    expect(writeSpy).toHaveBeenCalledWith(`${cliVersion}\n`);
+    writeSpy.mockRestore();
+  });
+
+  it("prints the version before dispatching subcommands", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await runCli(["catch", "--version"]);
+
+    expect(writeSpy).toHaveBeenCalledWith(`${cliVersion}\n`);
+    expect(runCatchCommandMock).not.toHaveBeenCalled();
     writeSpy.mockRestore();
   });
 

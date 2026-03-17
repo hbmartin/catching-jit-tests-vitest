@@ -16,15 +16,29 @@ function formatBlockquote(value: string): string {
 
 function formatPRComment(
   reports: readonly BehaviorReport[],
-  stats: RunStats,
+  stats: RunStats | null,
+  statusMessage?: string,
 ): string {
   if (reports.length === 0) {
-    return "";
+    if (statusMessage === undefined) {
+      return "";
+    }
+
+    return `## JiTTest: Status\n\n${escapeHtml(statusMessage)}\n`;
   }
 
-  const sections = reports
-    .map(
-      (report, i) => `### ${String(i + 1)}. ${escapeHtml(report.headline)}
+  const footer =
+    stats === null
+      ? ""
+      : `\n---\n<sub>Generated ${String(stats.totalTestsGenerated)} tests across ${String(stats.filesAnalyzed)} files in ${stats.duration}. ${String(stats.weakCatchCount)} weak catches found, ${String(reports.length)} passed assessment threshold.</sub>\n`;
+
+  return `## JiTTest: Behavior Change Detection
+
+${String(reports.length)} potential regression${reports.length > 1 ? "s" : ""} detected. If these changes are intentional, no action is needed.
+
+${reports
+  .map(
+    (report, i) => `### ${String(i + 1)}. ${escapeHtml(report.headline)}
 
 ${formatBlockquote(report.senseCheck)}
 
@@ -48,18 +62,8 @@ ${report.details.testCode}
 </details>
 </details>
 `,
-    )
-    .join("\n---\n");
-
-  return `## JiTTest: Behavior Change Detection
-
-${String(reports.length)} potential regression${reports.length > 1 ? "s" : ""} detected. If these changes are intentional, no action is needed.
-
-${sections}
-
----
-<sub>Generated ${String(stats.totalTestsGenerated)} tests across ${String(stats.filesAnalyzed)} files in ${stats.duration}. ${String(stats.weakCatchCount)} weak catches found, ${String(reports.length)} passed assessment threshold.</sub>
-`;
+  )
+  .join("\n---\n")}${footer}`;
 }
 
 export { formatPRComment };

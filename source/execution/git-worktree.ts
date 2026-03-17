@@ -1,11 +1,19 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
-import { runCommand } from "../utils/process.js";
+import { CommandError, runCommand } from "../utils/process.js";
 
 import type { WorktreeSetup } from "./types.js";
+
+type PackageManager = "npm" | "pnpm" | "yarn";
+
+const packageManagerInstallArgs: Record<PackageManager, readonly string[]> = {
+  npm: ["ci", "--prefer-offline"],
+  pnpm: ["install", "--frozen-lockfile"],
+  yarn: ["install", "--frozen-lockfile"],
+};
 
 async function execInDir(
   command: string,
@@ -110,17 +118,163 @@ async function setupWorktrees(
 
 async function installDependencies(projectDir: string): Promise<void> {
   logger.info(`Installing dependencies in ${projectDir}`);
+
+  const { preferred, fallbacks } = await detectPackageManagerOrder(projectDir);
+  logger.info(`Using ${preferred} to install dependencies`);
+
   try {
-    await execInDir("npm", ["ci", "--prefer-offline"], projectDir);
+    await runPackageManagerInstall(projectDir, preferred);
     return;
-  } catch {
-    try {
-      await execInDir("pnpm", ["install", "--frozen-lockfile"], projectDir);
-      return;
-    } catch {
-      await execInDir("yarn", ["install", "--frozen-lockfile"], projectDir);
+  } catch (error) {
+    if (!isMissingPackageManagerError(error, preferred)) {
+      throw error;
     }
+
+    let lastError: unknown = error;
+    for (const fallback of fallbacks) {
+      try {
+        logger.info(`Falling back to ${fallback} after missing ${preferred}`);
+        await runPackageManagerInstall(projectDir, fallback);
+        return;
+      } catch (fallbackError) {
+        if (!isMissingPackageManagerError(fallbackError, fallback)) {
+          throw fallbackError;
+        }
+        lastError = fallbackError;
+      }
+    }
+
+    throw lastError;
   }
+}
+
+async function pathExists(filePath: string): Promise<boolean> {
+  try {
+    await access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function parseDeclaredPackageManager(
+  packageManager: unknown,
+): PackageManager | null {
+  if (typeof packageManager !== "string" || packageManager.length === 0) {
+    return null;
+  }
+
+  const [name] = packageManager.split("@");
+  if (name === "npm" || name === "pnpm" || name === "yarn") {
+    return name;
+  }
+
+  return null;
+}
+
+async function readDeclaredPackageManager(
+  projectDir: string,
+): Promise<PackageManager | null> {
+  try {
+    const packageJsonPath = path.join(projectDir, "package.json");
+    const packageJson = JSON.parse(
+      await readFile(packageJsonPath, "utf-8"),
+    ) as {
+      packageManager?: unknown;
+    };
+
+    return parseDeclaredPackageManager(packageJson.packageManager);
+  } catch {
+    return null;
+  }
+}
+
+async function findLockfileManagers(
+  projectDir: string,
+): Promise<PackageManager[]> {
+  const managers: PackageManager[] = [];
+
+  if (await pathExists(path.join(projectDir, "pnpm-lock.yaml"))) {
+    managers.push("pnpm");
+  }
+
+  if (await pathExists(path.join(projectDir, "yarn.lock"))) {
+    managers.push("yarn");
+  }
+
+  if (await pathExists(path.join(projectDir, "package-lock.json"))) {
+    managers.push("npm");
+  }
+
+  return managers;
+}
+
+async function detectPackageManagerOrder(projectDir: string): Promise<{
+  preferred: PackageManager;
+  fallbacks: PackageManager[];
+}> {
+  const declared = await readDeclaredPackageManager(projectDir);
+  const lockfileManagers = await findLockfileManagers(projectDir);
+
+  if (declared || lockfileManagers.length > 0) {
+    const ordered = [
+      ...new Set([declared, ...lockfileManagers].filter(Boolean)),
+    ] as PackageManager[];
+    const [preferred = "npm", ...fallbacks] = ordered;
+    return { preferred, fallbacks };
+  }
+
+  return {
+    preferred: "npm",
+    fallbacks: ["pnpm", "yarn"],
+  };
+}
+
+function buildPackageManagerCommand(manager: PackageManager): {
+  command: string;
+  args: readonly string[];
+} {
+  const installArgs = packageManagerInstallArgs[manager];
+  if (process.platform === "win32") {
+    return {
+      command: "cmd.exe",
+      args: ["/d", "/s", "/c", [manager, ...installArgs].join(" ")],
+    };
+  }
+
+  return {
+    command: manager,
+    args: installArgs,
+  };
+}
+
+async function runPackageManagerInstall(
+  projectDir: string,
+  manager: PackageManager,
+): Promise<void> {
+  const { command, args } = buildPackageManagerCommand(manager);
+  await execInDir(command, args, projectDir);
+}
+
+function isMissingPackageManagerError(
+  error: unknown,
+  manager: PackageManager,
+): boolean {
+  if (!(error instanceof CommandError)) {
+    return false;
+  }
+
+  if (error.errorCode === "ENOENT") {
+    return true;
+  }
+
+  const rendered = `${error.message}\n${error.stderr}`.toLowerCase();
+  return (
+    rendered.includes(`${manager}: command not found`) ||
+    rendered.includes(`${manager}: not found`) ||
+    rendered.includes(`'${manager}' is not recognized`) ||
+    rendered.includes(`"${manager}" is not recognized`)
+  );
 }
 
 export { installDependencies, setupWorktrees };
