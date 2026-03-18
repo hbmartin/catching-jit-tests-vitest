@@ -1,6 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  computeRiskAnalysis,
   computeRiskFactors,
   computeRiskScore,
 } from "../../source/diff/risk-scorer.js";
@@ -22,6 +27,10 @@ function makeDiffContext(overrides: Partial<DiffContext> = {}): DiffContext {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("computeRiskFactors", () => {
   it("returns zero scores for empty diff", () => {
@@ -193,5 +202,65 @@ describe("computeRiskScore", () => {
 
     expect(scoreWithoutHistory).toBeGreaterThan(scoreWithHistory);
     expect(scoreWithoutHistory).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("computeRiskAnalysis", () => {
+  it("logs a warning and omits defect history when git history cannot be read", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "risk-scorer-"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    try {
+      const diff = makeDiffContext({
+        rawDiff: "+const token = getToken();",
+        files: [
+          {
+            path: "source/auth/login.ts",
+            hunks: [
+              {
+                header: "@@ -1,1 +1,1 @@",
+                oldStart: 1,
+                oldLines: 1,
+                newStart: 1,
+                newLines: 1,
+                content: "+const token = getToken();",
+              },
+            ],
+            existingTestFile: null,
+            changedExports: [],
+            changedFunctions: [],
+            touchesAuth: true,
+            touchesPayments: false,
+            touchesDataModel: false,
+            touchesAccessControl: false,
+          },
+        ],
+      });
+
+      const analysis = await computeRiskAnalysis(repoRoot, diff);
+
+      expect(analysis.factors.defectHistory).toBe(0);
+      expect(analysis.reasons).toContain(
+        "Git history could not be read, so defect-history risk was omitted from scoring.",
+      );
+      expect(analysis.score).toBe(
+        computeRiskScore(
+          {
+            ...diff,
+            riskFactors: analysis.factors,
+          },
+          {
+            defectHistoryAvailable: false,
+          },
+        ),
+      );
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toContain(
+        "Failed to calculate defect history, omitting history from risk score:",
+      );
+      expect(warnSpy.mock.calls[0]?.[0]).toContain("source/auth/login.ts");
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
   });
 });

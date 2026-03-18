@@ -3,6 +3,7 @@ import type { DiffContext } from "../diff/types.js";
 import type { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
+import { resolveProjectContext } from "./context.js";
 import {
   computeInlineDiff,
   synthesizeMultipleTests,
@@ -11,12 +12,19 @@ import type { GeneratedTest } from "./types.js";
 
 async function dodgyDiffWorkflow(
   diff: DiffContext,
+  repoRoot: string,
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<GeneratedTest[]> {
   const tests: GeneratedTest[] = [];
 
   for (const file of diff.files) {
+    const { existingTests, projectContext } = await resolveProjectContext(
+      repoRoot,
+      diff,
+      file,
+    );
+
     for (const fn of file.changedFunctions) {
       logger.info(`Generating dodgy-diff tests for ${fn.name} in ${file.path}`);
 
@@ -25,17 +33,13 @@ async function dodgyDiffWorkflow(
           targetSource: fn.parentSource || fn.childSource,
           targetPath: file.path,
           fullFileSource: fn.childFileSource,
-          existingTests: null,
+          existingTests,
           targetBehavior: {
             kind: "mutant",
             mutantDiff: computeInlineDiff(fn.parentSource, fn.childSource),
             mutantDescription: `Change in ${fn.name}: ${fn.signature}`,
           },
-          projectContext: {
-            availableImports: [],
-            tsConfigPath: null,
-            packageJsonPath: null,
-          },
+          projectContext,
           targetSymbol: fn.name,
           workflow: "dodgy-diff",
           candidateKey: `${file.path}:${fn.name}:${fn.signature}`,

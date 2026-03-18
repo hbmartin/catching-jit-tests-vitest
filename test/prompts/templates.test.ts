@@ -15,6 +15,9 @@ describe("killMutantPrompt", () => {
       mutantDiff: "-return a + b;\n+return a - b;",
       importPath: "./math.js",
       existingTests: null,
+      availableImports: ["add"],
+      tsConfigPath: "tsconfig.json",
+      packageJsonPath: "package.json",
     });
 
     expect(prompt).toContain("Original Code (Parent)");
@@ -22,6 +25,8 @@ describe("killMutantPrompt", () => {
     expect(prompt).toContain("Mutated Code");
     expect(prompt).toContain("function add(a, b) { return a - b; }");
     expect(prompt).toContain("./math.js");
+    expect(prompt).toContain("Known Importable Symbols");
+    expect(prompt).toContain("package.json");
     expect(prompt).toContain("Vitest");
   });
 
@@ -32,6 +37,9 @@ describe("killMutantPrompt", () => {
       mutantDiff: "diff",
       importPath: "./module.js",
       existingTests: "describe('existing', () => { it('works', () => {}) })",
+      availableImports: [],
+      tsConfigPath: null,
+      packageJsonPath: null,
     });
 
     expect(prompt).toContain("Existing Test Style");
@@ -77,6 +85,8 @@ describe("judgeCatchPrompt", () => {
       inferredIntent: "Double the value",
       testCode: "expect(fn(5)).toBe(10);",
       failureMessage: "Expected 10, got 5",
+      executionLog: "Error: mismatch\n    at suite (test.ts:1:1)",
+      stackTrace: "    at suite (test.ts:1:1)",
       parentBehavior: "Returns 10",
       childBehavior: "Returns 5",
       changeType: "return-value-changed",
@@ -85,6 +95,7 @@ describe("judgeCatchPrompt", () => {
     expect(prompt).toContain("UNEXPECTED BUG");
     expect(prompt).toContain("INTENDED");
     expect(prompt).toContain("return x * 2");
-    expect(prompt).toContain("isUnexpectedBug");
+    expect(prompt).toContain("unexpectedLikelihood");
+    expect(prompt).toContain("Execution Log");
   });
 });

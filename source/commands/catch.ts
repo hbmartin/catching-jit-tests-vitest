@@ -8,7 +8,10 @@ import {
   installDependencies,
   setupWorktrees,
 } from "../execution/git-worktree.js";
-import { dualExecution } from "../execution/runner.js";
+import {
+  dualExecution,
+  validateIntentAwareTests,
+} from "../execution/runner.js";
 import { dodgyDiffWorkflow } from "../generation/dodgy-diff.js";
 import { intentAwareWorkflow } from "../generation/intent-aware.js";
 import type { GeneratedTest } from "../generation/types.js";
@@ -106,7 +109,7 @@ const generateTests = async (
   const allTests: GeneratedTest[] = [];
 
   if (config.workflow === "dodgy-diff" || config.workflow === "both") {
-    allTests.push(...(await dodgyDiffWorkflow(diff, llm, config)));
+    allTests.push(...(await dodgyDiffWorkflow(diff, repoRoot, llm, config)));
   }
 
   if (config.workflow === "intent-aware" || config.workflow === "both") {
@@ -205,9 +208,15 @@ const executeInWorktrees = async (input: {
       installDependencies(worktrees.childDir),
     ]);
 
+    const executableTests = await validateIntentAwareTests(
+      input.allTests,
+      worktrees.parentDir,
+      input.config.testTimeout,
+    );
+
     logger.info("Running dual execution...");
     const dualResults = await dualExecution(
-      input.allTests,
+      executableTests,
       worktrees.parentDir,
       worktrees.childDir,
       input.config.batchSize,
@@ -244,7 +253,7 @@ const assessWeakCatches = async (input: {
     const assessment = await assessWeakCatch(
       weakCatch,
       input.diff,
-      weakCatch.executionLog ?? weakCatch.childResult.failureMessage,
+      weakCatch.childResult.failureMessage,
       input.llm,
       input.config,
     );

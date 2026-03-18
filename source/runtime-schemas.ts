@@ -19,6 +19,14 @@ export const generatedTestSchema = z.object({
   behaviorDescription: z.string(),
   workflow: workflowSchema.exclude(["both"]),
   generatorConfidence: z.number().min(0).max(1),
+  inferredIntent: z.string().nullable().optional(),
+  mutantValidation: z
+    .object({
+      targetFilePath: z.string(),
+      mutantCode: z.string(),
+    })
+    .nullable()
+    .optional(),
 });
 
 export type GeneratedTest = z.infer<typeof generatedTestSchema>;
@@ -83,6 +91,7 @@ export type VitestAssertionResult = z.infer<typeof vitestAssertionResultSchema>;
 export const vitestFileResultSchema = z.object({
   name: z.string(),
   status: vitestStatusSchema,
+  message: z.string().optional().default(""),
   assertionResults: z.array(vitestAssertionResultSchema),
 });
 

@@ -53,7 +53,7 @@ function describeBehaviorChange(result: DualExecutionResult): BehaviorChange {
     };
   }
 
-  if (failure.isRuntimeError) {
+  if (failure.isRuntimeError && failure.assertionType === "other") {
     return {
       summary: "Code that previously succeeded now throws an error",
       parentBehavior: "No exception thrown",

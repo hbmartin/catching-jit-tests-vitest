@@ -4,10 +4,25 @@ function killMutantPrompt(vars: {
   mutantDiff: string;
   importPath: string;
   existingTests: string | null;
+  availableImports: readonly string[];
+  tsConfigPath: string | null;
+  packageJsonPath: string | null;
 }): string {
   const existingTestsSection = vars.existingTests
     ? `\n## Existing Test Style (match this)\n\`\`\`typescript\n${vars.existingTests}\n\`\`\``
     : "";
+  const knownImportsSection =
+    vars.availableImports.length > 0
+      ? `\n## Known Importable Symbols\nUse these exact exports from '${vars.importPath}' when possible: ${vars.availableImports.join(", ")}`
+      : "";
+  const projectFiles = [
+    vars.tsConfigPath ? `TypeScript config: ${vars.tsConfigPath}` : null,
+    vars.packageJsonPath ? `Package manifest: ${vars.packageJsonPath}` : null,
+  ].filter(Boolean);
+  const projectFilesSection =
+    projectFiles.length > 0
+      ? `\n## Project Files\n${projectFiles.join("\n")}`
+      : "";
 
   return `You are generating a Vitest test case. Your goal is to write a test that will PASS on the original code but FAIL on the mutated version.
 
@@ -25,6 +40,8 @@ ${vars.mutantSource}
 \`\`\`diff
 ${vars.mutantDiff}
 \`\`\`
+${knownImportsSection}
+${projectFilesSection}
 ${existingTestsSection}
 
 ## Instructions
@@ -32,6 +49,7 @@ ${existingTestsSection}
 1. Analyze exactly what behavioral difference the mutation introduces
 2. Write a Vitest test that:
    - Imports the function/class from '${vars.importPath}'
+   - Uses only valid exports from the target module; do not invent symbol names
    - Sets up the minimal state needed to trigger the changed behavior
    - Asserts on the ORIGINAL (parent) behavior — the test should PASS when the original code is running
    - The assertion should FAIL when the mutated code is running
@@ -150,10 +168,21 @@ function judgeCatchPrompt(vars: {
   inferredIntent: string;
   testCode: string;
   failureMessage: string;
+  executionLog: string;
+  stackTrace: string;
   parentBehavior: string;
   childBehavior: string;
   changeType: string;
 }): string {
+  const executionLogSection =
+    vars.executionLog.trim().length > 0
+      ? `\n## Execution Log\n${vars.executionLog}`
+      : "";
+  const stackTraceSection =
+    vars.stackTrace.trim().length > 0
+      ? `\n## Execution Trace\n${vars.stackTrace}`
+      : "";
+
   return `You are a code reviewer determining whether a test failure reveals an UNEXPECTED BUG in a code change, or whether the test failure simply reflects an INTENDED behavioral change.
 
 ## The Code Change (Diff)
@@ -171,6 +200,8 @@ ${vars.testCode}
 
 ## Test Failure Output
 ${vars.failureMessage}
+${executionLogSection}
+${stackTraceSection}
 
 ## Observed Behavioral Change
 - Before (parent): ${vars.parentBehavior}
@@ -179,24 +210,28 @@ ${vars.failureMessage}
 
 ## Instructions
 
-Classify this test failure:
+Classify how likely it is that this test failure reveals an unexpected bug.
 
-1. Is the behavioral change EXPECTED given the stated intent of the diff?
-   - If the diff is supposed to change X, and the test catches a change in X, that is an INTENDED change (false positive)
-   - If the diff is supposed to change X, but the test catches a change in Y (where Y should not have been affected), that is UNEXPECTED (true positive)
+1. Compare the observed behavior change against the inferred intent of the diff.
+   - If the diff is supposed to change X, and the test catches a change in X, that points toward LOW likelihood of an unexpected bug
+   - If the diff is supposed to change X, but the test catches a change in Y (where Y should not have been affected), that points toward HIGH likelihood of an unexpected bug
 
 2. Consider whether the test itself might be flawed:
    - Does it rely on implementation details?
    - Does it use fragile mocking?
    - Does it test something overly specific?
 
+3. Use these categories:
+   - high: strong evidence the failure reflects an unexpected bug
+   - medium: ambiguous or mixed evidence
+   - low: strong evidence the failure is intended or the test is flawed
+
 ## Output Format
 
 Return JSON (no markdown fencing):
 
 {
-  "isUnexpectedBug": true|false,
-  "confidence": "high"|"medium"|"low",
+  "unexpectedLikelihood": "high"|"medium"|"low",
   "explanation": "1-2 sentence rationale"
 }`;
 }

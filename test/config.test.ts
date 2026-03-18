@@ -25,6 +25,11 @@ describe("loadConfig", () => {
   const originalApiKey = process.env.ANTHROPIC_API_KEY;
 
   afterEach(() => {
+    if (originalApiKey === undefined) {
+      delete process.env.ANTHROPIC_API_KEY;
+      return;
+    }
+
     process.env.ANTHROPIC_API_KEY = originalApiKey;
   });
 

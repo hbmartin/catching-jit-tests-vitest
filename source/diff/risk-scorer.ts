@@ -1,4 +1,5 @@
 import { mapConcurrent } from "../utils/concurrency.js";
+import { logger } from "../utils/logger.js";
 import { runCommand } from "../utils/process.js";
 import type { ChangedFile, DiffContext, RiskFactors } from "./types.js";
 
@@ -186,7 +187,11 @@ const calculateDefectHistory = async (
       score: clampScore(totalTouches / files.length / 25),
       available: true,
     };
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(
+      `Failed to calculate defect history, omitting history from risk score: ${message}`,
+    );
     return {
       score: 0,
       available: false,

@@ -131,14 +131,26 @@ describe("parseVitestJsonOutput", () => {
     });
 
     const results = parseVitestJsonOutput(json);
-    expect(results).toHaveLength(3);
-    expect(results.map((result) => result.status)).toEqual([
-      "skipped",
-      "skipped",
-      "skipped",
-    ]);
-    expect(results.every((result) => result.failureAnalysis === null)).toBe(
-      true,
-    );
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe("skipped");
+    expect(results[0]?.failureAnalysis).toBeNull();
+  });
+
+  it("captures file-level failures when no assertions are reported", () => {
+    const json = JSON.stringify({
+      testResults: [
+        {
+          name: "test/example.test.ts",
+          status: "failed",
+          message: "Transform failed: Unexpected token",
+          assertionResults: [],
+        },
+      ],
+    });
+
+    const results = parseVitestJsonOutput(json);
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe("failed");
+    expect(results[0]?.failureMessage).toContain("Unexpected token");
   });
 });

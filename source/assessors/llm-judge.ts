@@ -14,6 +14,8 @@ async function singleModelJudge(
     inferredIntent: input.inferredIntent,
     testCode: input.testCode,
     failureMessage: input.failureMessage,
+    executionLog: input.executionLog,
+    stackTrace: input.stackTrace,
     parentBehavior: input.behaviorChange.parentBehavior,
     childBehavior: input.behaviorChange.childBehavior,
     changeType: input.behaviorChange.changeType,
@@ -29,23 +31,37 @@ async function singleModelJudge(
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`LLM judge failed: ${message}`);
     return {
-      isUnexpectedBug: false,
-      confidence: "low",
+      unexpectedLikelihood: "low",
       explanation: "LLM judge failed to produce a result",
     };
   }
 }
 
-const confidenceValues: Record<JudgeOutput["confidence"], number> = {
+const likelihoodValues: Record<JudgeOutput["unexpectedLikelihood"], number> = {
   high: 1.0,
-  medium: 0.5,
-  low: 0.2,
+  medium: 0.0,
+  low: -1.0,
 };
 
 function computeJudgmentScore(judgment: JudgeOutput): number {
-  const directionMultiplier = judgment.isUnexpectedBug ? 1 : -1;
-  const confidenceValue = confidenceValues[judgment.confidence];
-  return directionMultiplier * confidenceValue;
+  return likelihoodValues[judgment.unexpectedLikelihood];
+}
+
+function computeMedianScore(scores: readonly number[]): number {
+  if (scores.length === 0) {
+    return 0;
+  }
+
+  const sorted = [...scores].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+
+  if (sorted.length % 2 === 1) {
+    return sorted[middle] ?? 0;
+  }
+
+  const lower = sorted[middle - 1] ?? 0;
+  const upper = sorted[middle] ?? 0;
+  return (lower + upper) / 2;
 }
 
 async function ensembleJudge(
@@ -65,15 +81,14 @@ async function ensembleJudge(
   const scores = judgments.map(({ judgment }) =>
     computeJudgmentScore(judgment),
   );
-  const sorted = [...scores].sort((a, b) => a - b);
-  const medianScore = sorted[Math.floor(sorted.length / 2)] ?? 0;
+  const medianScore = computeMedianScore(scores);
 
   return {
     score: medianScore,
     rationale: judgments
       .map(
         ({ model, judgment }) =>
-          `[${model}] ${judgment.isUnexpectedBug ? "BUG" : "INTENDED"} (${judgment.confidence}): ${judgment.explanation}`,
+          `[${model}] ${judgment.unexpectedLikelihood.toUpperCase()} unexpected likelihood: ${judgment.explanation}`,
       )
       .join("\n"),
     detectedPatterns: [],
