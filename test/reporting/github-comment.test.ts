@@ -35,6 +35,17 @@ describe("formatPRComment", () => {
     expect(result).toBe("");
   });
 
+  it("renders a status message when no reports were generated", () => {
+    const result = formatPRComment(
+      [],
+      null,
+      "No tests were generated for the current diff.",
+    );
+
+    expect(result).toContain("JiTTest: Status");
+    expect(result).toContain("No tests were generated for the current diff.");
+  });
+
   it("formats a single report correctly", () => {
     const reports: BehaviorReport[] = [
       {

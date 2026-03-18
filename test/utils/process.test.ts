@@ -85,4 +85,39 @@ describe("runCommand", () => {
       "Command failed: git diff",
     );
   });
+
+  it("normalizes string process error codes separately from numeric exit codes", async () => {
+    const execFileAsyncMock = vi.fn().mockRejectedValue({
+      stderr: "",
+      stdout: "",
+      code: "ENOENT",
+    });
+
+    vi.doMock("node:child_process", () => ({
+      execFile: vi.fn(),
+    }));
+    vi.doMock("node:util", async () => {
+      const actual =
+        await vi.importActual<typeof import("node:util")>("node:util");
+
+      return {
+        ...actual,
+        promisify: () => execFileAsyncMock,
+      };
+    });
+
+    const { CommandError, runCommand } = await import(
+      "../../source/utils/process.js"
+    );
+
+    try {
+      await runCommand("pnpm", ["install"]);
+      throw new Error("Expected runCommand to throw");
+    } catch (error) {
+      const commandError = error as InstanceType<typeof CommandError>;
+      expect(error).toBeInstanceOf(CommandError);
+      expect(commandError.exitCode).toBeNull();
+      expect(commandError.errorCode).toBe("ENOENT");
+    }
+  });
 });

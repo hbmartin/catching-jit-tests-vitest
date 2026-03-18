@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
 
@@ -113,8 +113,8 @@ async function getFileAtCommit(
 
 async function fileExists(filePath: string): Promise<boolean> {
   try {
-    await access(filePath);
-    return true;
+    const fileStats = await stat(filePath);
+    return fileStats.isFile();
   } catch {
     return false;
   }

@@ -45,9 +45,9 @@ async function runVitest(
   testFiles: readonly GeneratedTest[],
   timeout: number,
 ): Promise<VitestRunResult> {
-  await Promise.all(testFiles.map((test) => writeTestFile(projectDir, test)));
-
   try {
+    await Promise.all(testFiles.map((test) => writeTestFile(projectDir, test)));
+
     const result = await runCommand(
       "npx",
       [

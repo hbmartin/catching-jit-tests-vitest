@@ -85,4 +85,10 @@ describe("parseCatchCommandOptions", () => {
     expect(options.timeout).toBe(45_000);
     expect(options.reportThreshold).toBe(-0.2);
   });
+
+  it("rejects blank base head and cwd values", () => {
+    expect(() => parseCatchCommandOptions({ base: "   " })).toThrow();
+    expect(() => parseCatchCommandOptions({ head: "" })).toThrow();
+    expect(() => parseCatchCommandOptions({ cwd: " " })).toThrow();
+  });
 });

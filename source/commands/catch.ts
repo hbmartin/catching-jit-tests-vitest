@@ -386,21 +386,23 @@ export const runCatchCommand = async (
   const result = await createCatchCommandResult(options);
 
   if (options.output === "github-comment") {
-    if (result.stats !== null) {
-      const comment = formatPRComment(result.reports, result.stats);
+    const comment = formatPRComment(
+      result.reports,
+      result.stats,
+      result.statusMessage,
+    );
 
-      if (comment.length > 0) {
-        writeStdout(comment);
-      }
+    if (comment.length > 0) {
+      writeStdout(comment);
     }
 
     return;
   }
 
   if (options.output === "json") {
-    if (result.stats !== null) {
-      writeStdout(formatJsonReport(result.reports, result.stats));
-    }
+    writeStdout(
+      formatJsonReport(result.reports, result.stats, result.statusMessage),
+    );
 
     return;
   }

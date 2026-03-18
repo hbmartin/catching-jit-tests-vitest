@@ -1,3 +1,4 @@
+import { mapConcurrent } from "../utils/concurrency.js";
 import { runCommand } from "../utils/process.js";
 import type { ChangedFile, DiffContext, RiskFactors } from "./types.js";
 
@@ -5,6 +6,11 @@ interface RiskAnalysis {
   score: number;
   factors: RiskFactors;
   reasons: string[];
+}
+
+interface DefectHistoryResult {
+  score: number;
+  available: boolean;
 }
 
 const sensitivityPatterns: ReadonlyArray<{
@@ -44,6 +50,7 @@ const sensitivityPatterns: ReadonlyArray<{
 ];
 
 const clampScore = (value: number): number => Math.max(0, Math.min(1, value));
+const gitHistoryConcurrency = 8;
 
 const matchesSensitivityLabel = (diff: DiffContext, label: string): boolean =>
   diff.files.some((file) => {
@@ -144,34 +151,55 @@ const readHistoryTouches = async (
     const count = Number.parseInt(result.stdout.trim(), 10);
 
     if (Number.isNaN(count)) {
-      return 0;
+      throw new Error(`Unexpected git history count: ${result.stdout.trim()}`);
     }
 
     return count;
-  } catch {
-    return 0;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to read git history for ${filePath}: ${message}`, {
+      cause: error,
+    });
   }
 };
 
 const calculateDefectHistory = async (
   repoRoot: string,
   files: readonly ChangedFile[],
-): Promise<number> => {
+): Promise<DefectHistoryResult> => {
   if (files.length === 0) {
-    return 0;
+    return {
+      score: 0,
+      available: true,
+    };
   }
 
-  const touchCounts = await Promise.all(
-    files.map((file) => readHistoryTouches(repoRoot, file.path)),
-  );
-  const totalTouches = touchCounts.reduce((sum, count) => sum + count, 0);
+  try {
+    const touchCounts = await mapConcurrent(
+      files,
+      gitHistoryConcurrency,
+      async (file) => readHistoryTouches(repoRoot, file.path),
+    );
+    const totalTouches = touchCounts.reduce((sum, count) => sum + count, 0);
 
-  return clampScore(totalTouches / files.length / 25);
+    return {
+      score: clampScore(totalTouches / files.length / 25),
+      available: true,
+    };
+  } catch {
+    return {
+      score: 0,
+      available: false,
+    };
+  }
 };
 
 const buildRiskReasons = (
   diff: DiffContext,
   factors: RiskFactors,
+  options: {
+    defectHistoryAvailable: boolean;
+  },
 ): string[] => {
   const reasons: string[] = [];
 
@@ -215,6 +243,12 @@ const buildRiskReasons = (
     reasons.push("The diff spans multiple hunks or a high line count.");
   }
 
+  if (!options.defectHistoryAvailable) {
+    reasons.push(
+      "Git history could not be read, so defect-history risk was omitted from scoring.",
+    );
+  }
+
   if (factors.defectHistory >= 0.5) {
     reasons.push("The touched files have a high historical churn count.");
   }
@@ -226,14 +260,27 @@ const buildRiskReasons = (
   return reasons;
 };
 
-function computeRiskScore(diff: DiffContext): number {
+function computeRiskScore(
+  diff: DiffContext,
+  options: {
+    defectHistoryAvailable?: boolean;
+  } = {},
+): number {
   const factors = diff.riskFactors ?? computeRiskFactors(diff);
+  const defectHistoryWeight =
+    options.defectHistoryAvailable === false ? 0 : 0.15;
+  const totalWeight = 0.4 + 0.25 + 0.2 + defectHistoryWeight;
+
+  if (totalWeight === 0) {
+    return 0;
+  }
 
   return clampScore(
-    factors.sensitivityScore * 0.4 +
+    (factors.sensitivityScore * 0.4 +
       factors.complexityScore * 0.25 +
       factors.coverageGap * 0.2 +
-      factors.defectHistory * 0.15,
+      factors.defectHistory * defectHistoryWeight) /
+      totalWeight,
   );
 }
 
@@ -241,18 +288,29 @@ const computeRiskAnalysis = async (
   repoRoot: string,
   diffContext: DiffContext,
 ): Promise<RiskAnalysis> => {
+  const defectHistory = await calculateDefectHistory(
+    repoRoot,
+    diffContext.files,
+  );
   const factors = {
     ...computeRiskFactors(diffContext),
-    defectHistory: await calculateDefectHistory(repoRoot, diffContext.files),
+    defectHistory: defectHistory.score,
   };
 
   return {
-    score: computeRiskScore({
-      ...diffContext,
-      riskFactors: factors,
-    }),
+    score: computeRiskScore(
+      {
+        ...diffContext,
+        riskFactors: factors,
+      },
+      {
+        defectHistoryAvailable: defectHistory.available,
+      },
+    ),
     factors,
-    reasons: buildRiskReasons(diffContext, factors),
+    reasons: buildRiskReasons(diffContext, factors, {
+      defectHistoryAvailable: defectHistory.available,
+    }),
   };
 };
 

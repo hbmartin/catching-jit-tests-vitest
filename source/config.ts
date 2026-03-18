@@ -35,15 +35,15 @@ type Workflow = z.infer<typeof workflowSchema>;
 type OutputFormat = z.infer<typeof outputFormatSchema>;
 
 const catchCommandOptionsSchema = z.object({
-  base: z.string().default("origin/main"),
-  head: z.string().default("HEAD"),
+  base: z.string().trim().min(1).default("origin/main"),
+  head: z.string().trim().min(1).default("HEAD"),
   workflow: workflowSchema.default("both"),
   riskThreshold: z.coerce.number().min(0).max(1).default(0),
   testsPerFunction: z.coerce.number().int().min(1).default(3),
   timeout: z.coerce.number().int().positive().default(30_000),
   output: outputFormatSchema.default("console"),
   reportThreshold: z.coerce.number().min(-1).max(1).default(0),
-  cwd: z.string().default("."),
+  cwd: z.string().trim().min(1).default("."),
   prTitle: z.string().default(""),
   prBody: z.string().default(""),
 });

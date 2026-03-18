@@ -90,8 +90,8 @@ const parseCatchOptions = (argv: readonly string[]) => {
 const shouldPrintHelp = (command: string | undefined): boolean =>
   command === undefined || command === "--help" || command === "-h";
 
-const shouldPrintVersion = (command: string | undefined): boolean =>
-  command === "--version" || command === "-v";
+const shouldPrintVersion = (argv: readonly string[]): boolean =>
+  argv.includes("--version") || argv.includes("-v");
 
 const executeCommand = async (
   command: string,
@@ -122,7 +122,7 @@ const runCli = async (argv: readonly string[]): Promise<void> => {
     return;
   }
 
-  if (shouldPrintVersion(command)) {
+  if (shouldPrintVersion(argv)) {
     printVersion();
     return;
   }

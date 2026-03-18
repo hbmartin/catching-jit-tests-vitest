@@ -22,7 +22,11 @@ function goodbye() { return "bye"; }`;
   });
 
   it("extracts arrow function declarations", () => {
-    const source = String.raw`const greet = (name: string) => \`Hello \${name}\`;`;
+    const source = [
+      "const greet = (name: string) => `Hello ",
+      "$",
+      "{name}`;",
+    ].join("");
     const sf = ts.createSourceFile(
       "test.ts",
       source,

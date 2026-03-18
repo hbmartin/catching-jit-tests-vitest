@@ -74,6 +74,7 @@ describe("formatCatchResult", () => {
     });
 
     expect(result).toContain("Tests generated: 3");
+    expect(result).toContain("Reports generated: 1");
     expect(result).toContain("1. Unexpected behavior change detected");
   });
 });
