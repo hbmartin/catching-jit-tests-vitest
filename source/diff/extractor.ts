@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import path from "node:path";
 import ts from "typescript";
 
+import { defaultExcludePatterns, defaultIncludePatterns } from "../config.js";
 import { CommandError, runCommand } from "../utils/process.js";
 
 import { analyzeFileChanges, extractFunctions } from "./ast-analyzer.js";
@@ -15,6 +16,11 @@ import type {
 } from "./types.js";
 
 const hunkHeaderRegex = /^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/;
+const regexSpecialCharacterPattern = /[.+^${}()|[\]\\]/;
+interface DiffFileFilters {
+  readonly include: readonly string[];
+  readonly exclude: readonly string[];
+}
 
 function parseHunkLineCount(value: string | undefined): number {
   if (value === undefined || value.length === 0) {
@@ -22,6 +28,65 @@ function parseHunkLineCount(value: string | undefined): number {
   }
 
   return Number.parseInt(value, 10);
+}
+
+function escapeRegexCharacter(char: string): string {
+  return regexSpecialCharacterPattern.test(char) ? `\\${char}` : char;
+}
+
+function globToRegExp(pattern: string): RegExp {
+  const normalizedPattern = pattern.replaceAll("\\", "/");
+  let regexSource = "";
+
+  for (let i = 0; i < normalizedPattern.length; i += 1) {
+    const char = normalizedPattern[i];
+    const next = normalizedPattern[i + 1];
+
+    if (char === "*" && next === "*") {
+      if (normalizedPattern[i + 2] === "/") {
+        regexSource += "(?:.*/)?";
+        i += 2;
+      } else {
+        regexSource += ".*";
+        i += 1;
+      }
+    } else if (char === "*") {
+      regexSource += "[^/]*";
+    } else if (char === "?") {
+      regexSource += "[^/]";
+    } else {
+      regexSource += escapeRegexCharacter(char ?? "");
+    }
+  }
+
+  return new RegExp(`^${regexSource}$`);
+}
+
+function matchesAnyGlob(
+  filePath: string,
+  patterns: readonly string[],
+): boolean {
+  const normalizedPath = filePath.replaceAll("\\", "/");
+  return patterns.some((pattern) => globToRegExp(pattern).test(normalizedPath));
+}
+
+function matchesFileFilters(
+  filePath: string,
+  filters: Partial<DiffFileFilters> = {},
+): boolean {
+  const includePatterns =
+    filters.include && filters.include.length > 0
+      ? filters.include
+      : defaultIncludePatterns;
+  const excludePatterns =
+    filters.exclude && filters.exclude.length > 0
+      ? filters.exclude
+      : defaultExcludePatterns;
+
+  return (
+    matchesAnyGlob(filePath, includePatterns) &&
+    !matchesAnyGlob(filePath, excludePatterns)
+  );
 }
 
 function parseHunks(diffText: string): DiffHunk[] {
@@ -318,20 +383,15 @@ async function extractDiff(
   headSha: string,
   prMeta: DiffContext["pr"],
   cwd?: string,
+  filters: Partial<DiffFileFilters> = {},
 ): Promise<DiffContext> {
-  const rawDiff = await execGit(["diff", `${baseSha}...${headSha}`], cwd);
-
   const changedPaths = await getChangedFilePaths(baseSha, headSha, cwd);
-  const tsFiles = changedPaths.filter(
-    (f) =>
-      f.endsWith(".ts") &&
-      !f.endsWith(".test.ts") &&
-      !f.endsWith(".spec.ts") &&
-      !f.includes("node_modules"),
+  const matchedFiles = changedPaths.filter((filePath) =>
+    matchesFileFilters(filePath, filters),
   );
 
   const parsedFiles = await Promise.all(
-    tsFiles.map(async (filePath) => {
+    matchedFiles.map(async (filePath) => {
       const fileDiff = await getFileDiff(baseSha, headSha, filePath, cwd);
       const hunks = parseHunks(fileDiff);
       const sensitivity = detectSensitivity(filePath, fileDiff);
@@ -353,10 +413,12 @@ async function extractDiff(
           ...sensitivity,
         } satisfies ChangedFile,
         symbols,
+        fileDiff,
       };
     }),
   );
 
+  const rawDiff = parsedFiles.map((entry) => entry.fileDiff).join("\n");
   const files = parsedFiles.map((entry) => entry.file);
   const allSymbols = parsedFiles.flatMap((entry) => entry.symbols);
 
@@ -382,6 +444,8 @@ function extractDiffContext(options: {
   cwd: string;
   prTitle?: string;
   prBody?: string;
+  include?: readonly string[];
+  exclude?: readonly string[];
 }): Promise<DiffContext> {
   return extractDiff(
     options.baseRef,
@@ -394,6 +458,10 @@ function extractDiffContext(options: {
       headSha: options.headRef,
     },
     options.cwd,
+    {
+      include: options.include,
+      exclude: options.exclude,
+    },
   );
 }
 
@@ -406,6 +474,8 @@ export {
   getChangedFilePaths,
   getFileAtCommit,
   getFileDiff,
+  globToRegExp,
+  matchesFileFilters,
   parseHunks,
   resolveChangedFunctions,
 };

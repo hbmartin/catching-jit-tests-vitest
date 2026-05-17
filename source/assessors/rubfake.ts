@@ -32,11 +32,38 @@ const typeErrorPatterns = [
   /Cannot read properties of undefined \(reading '(.+)'\)/,
 ];
 
+const notImplementedPatterns = [
+  /not implemented/i,
+  /NotImplemented(Error|Exception)?/,
+  /TODO.*implement/i,
+];
+
+const dataProviderFailurePatterns = [
+  /data provider/i,
+  /test\.each/i,
+  /describe\.each/i,
+  /Invalid test cases/i,
+];
+
+const undefinedVariablePatterns = [
+  /ReferenceError: .+ is not defined/,
+  /Cannot find name '(.+)'/,
+  /is not defined/,
+];
+
+const flakinessPatterns = [
+  /timeout/i,
+  /timed out/i,
+  /flaky/i,
+  /random/i,
+  /Exceeded timeout/i,
+];
+
 const heavyMockPattern = /vi\.(mock|spyOn|fn)/g;
 const callCountPattern = /toHaveBeenCalledTimes\(\d+\)/;
 const toEqualPattern = /toEqual.*\{/;
 const serializesPattern = /Received.*serializes to the same string/;
-const privateMemberPattern = /\['_\w+'\]|\.#\w+|private/;
+const privateMemberPattern = /\['_\w+'\]|\.#\w+|private|protected/;
 
 const reflectionPatterns = [
   /\.constructor\.name/,
@@ -54,6 +81,21 @@ const emptyContainerPatterns = [
   /index out of range/i,
   /\.length.*0.*expected/i,
   /empty array/i,
+];
+
+const keyFailurePatterns = [
+  /key out of bounds/i,
+  /missing key/i,
+  /property .+ does not exist/i,
+  /Cannot read properties of .+ \(reading ['"].+['"]\)/,
+];
+
+const createFailurePatterns = [
+  /cannot construct/i,
+  /constructor/i,
+  /failed to create/i,
+  /cannot instantiate/i,
+  /is not a constructor/i,
 ];
 
 const refactorSignals = [
@@ -75,6 +117,63 @@ const addOnlySignals = [
   /new endpoint/i,
   /add.*field/i,
 ];
+
+const deadCodeSignals = [
+  /dead code/i,
+  /unused/i,
+  /remove.*unreachable/i,
+  /delete.*unused/i,
+];
+
+const rbacSignals = [
+  /rbac/i,
+  /role/i,
+  /permission/i,
+  /access control/i,
+  /authorization/i,
+];
+const diffChangedLinePattern = /^[+-]/;
+const booleanLogicPattern = /\b(true|false)\b|!|&&|\|\||===|!==|<=|>=|<|>/;
+const nullishPattern = /\b(null|undefined)\b/;
+
+function diffText(ctx: RuleContext): string {
+  return [
+    ctx.diff.rawDiff,
+    ctx.diff.files
+      .map((file) => file.hunks.map((hunk) => hunk.content).join("\n"))
+      .join("\n"),
+  ]
+    .filter((value) => value.length > 0)
+    .join("\n");
+}
+
+function intentText(ctx: RuleContext): string {
+  return `${ctx.diff.pr.title}\n${ctx.diff.pr.body}`;
+}
+
+function hasDirectBooleanChange(ctx: RuleContext): boolean {
+  return diffText(ctx)
+    .split("\n")
+    .some(
+      (line) =>
+        diffChangedLinePattern.test(line) && booleanLogicPattern.test(line),
+    );
+}
+
+function hasDirectNullishChange(ctx: RuleContext): boolean {
+  return diffText(ctx)
+    .split("\n")
+    .some(
+      (line) => diffChangedLinePattern.test(line) && nullishPattern.test(line),
+    );
+}
+
+function touchesAccessControl(ctx: RuleContext): boolean {
+  return (
+    ctx.diff.files.some((file) => file.touchesAccessControl) ||
+    rbacSignals.some((pattern) => pattern.test(diffText(ctx)))
+  );
+}
 
 const falsePositiveRules: readonly RubFakeRule[] = [
   {
@@ -147,6 +246,65 @@ const falsePositiveRules: readonly RubFakeRule[] = [
     },
   },
   {
+    name: "not_implemented_exception",
+    direction: "false-positive",
+    confidence: "high",
+    sources: ["execution-log"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const matched = notImplementedPatterns.some((pattern) =>
+        pattern.test(ctx.executionLog),
+      );
+      if (!matched) {
+        return null;
+      }
+
+      return {
+        score: -0.9,
+        evidence:
+          "Failure appears to come from an intentional not-implemented placeholder",
+      };
+    },
+  },
+  {
+    name: "data_provider_broken",
+    direction: "false-positive",
+    confidence: "high",
+    sources: ["execution-log", "test-code"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const combined = `${ctx.executionLog}\n${ctx.testCode}`;
+      const matched = dataProviderFailurePatterns.some((pattern) =>
+        pattern.test(combined),
+      );
+      if (!matched) {
+        return null;
+      }
+
+      return {
+        score: -0.8,
+        evidence: "Generated parameterized test data appears malformed",
+      };
+    },
+  },
+  {
+    name: "undefined_variable",
+    direction: "false-positive",
+    confidence: "high",
+    sources: ["execution-log", "test-code"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const matched = undefinedVariablePatterns.some((pattern) =>
+        pattern.test(ctx.executionLog),
+      );
+      if (!matched) {
+        return null;
+      }
+
+      return {
+        score: -0.8,
+        evidence: "Generated test refers to an undefined variable or symbol",
+      };
+    },
+  },
+  {
     name: "implementation_dependent",
     direction: "false-positive",
     confidence: "high",
@@ -162,7 +320,8 @@ const falsePositiveRules: readonly RubFakeRule[] = [
 
       if (
         toEqualPattern.test(ctx.testCode) &&
-        serializesPattern.test(ctx.executionLog)
+        (serializesPattern.test(ctx.executionLog) ||
+          ctx.weakCatch.behaviorChange.changeType === "ordering-changed")
       ) {
         return {
           score: -0.7,
@@ -217,6 +376,26 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       return null;
     },
   },
+  {
+    name: "flakiness",
+    direction: "false-positive",
+    confidence: "low",
+    sources: ["execution-log", "test-code"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const combined = `${ctx.executionLog}\n${ctx.testCode}`;
+      const matched = flakinessPatterns.some((pattern) =>
+        pattern.test(combined),
+      );
+      if (!matched) {
+        return null;
+      }
+
+      return {
+        score: -0.2,
+        evidence: "Failure contains timing or nondeterminism signals",
+      };
+    },
+  },
 ];
 
 const truePositiveRules: readonly RubFakeRule[] = [
@@ -228,6 +407,14 @@ const truePositiveRules: readonly RubFakeRule[] = [
     evaluate(ctx: RuleContext): PatternMatch | null {
       if (ctx.weakCatch.behaviorChange.changeType !== "boolean-flipped") {
         return null;
+      }
+
+      if (hasDirectBooleanChange(ctx)) {
+        return {
+          score: 0.35,
+          evidence:
+            "Boolean flipped, but the diff directly changes boolean logic",
+        };
       }
 
       return {
@@ -244,6 +431,14 @@ const truePositiveRules: readonly RubFakeRule[] = [
     evaluate(ctx: RuleContext): PatternMatch | null {
       if (ctx.weakCatch.behaviorChange.changeType !== "null-introduced") {
         return null;
+      }
+
+      if (hasDirectNullishChange(ctx)) {
+        return {
+          score: 0.4,
+          evidence:
+            "A value became null/undefined, but the diff directly changes nullish logic",
+        };
       }
 
       return {
@@ -279,6 +474,44 @@ const truePositiveRules: readonly RubFakeRule[] = [
     },
   },
   {
+    name: "unexpected_key_change",
+    direction: "true-positive",
+    confidence: "medium",
+    sources: ["execution-log", "diff"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const isKeyChange =
+        ctx.weakCatch.behaviorChange.changeType === "missing-key" ||
+        keyFailurePatterns.some((pattern) => pattern.test(ctx.executionLog));
+      if (!isKeyChange) {
+        return null;
+      }
+
+      return {
+        score: 0.7,
+        evidence: "An expected key or property disappeared unexpectedly",
+      };
+    },
+  },
+  {
+    name: "create_failure",
+    direction: "true-positive",
+    confidence: "medium",
+    sources: ["execution-log", "diff"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const matched = createFailurePatterns.some((pattern) =>
+        pattern.test(ctx.executionLog),
+      );
+      if (!matched) {
+        return null;
+      }
+
+      return {
+        score: 0.65,
+        evidence: "Object creation now fails despite previously succeeding",
+      };
+    },
+  },
+  {
     name: "refactor_intent",
     direction: "true-positive",
     confidence: "medium",
@@ -303,6 +536,28 @@ const truePositiveRules: readonly RubFakeRule[] = [
     },
   },
   {
+    name: "dead_code_removal",
+    direction: "true-positive",
+    confidence: "medium",
+    sources: ["diff"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const intent = intentText(ctx);
+      const isDeadCodeRemoval = deadCodeSignals.some((pattern) =>
+        pattern.test(intent),
+      );
+
+      if (!isDeadCodeRemoval) {
+        return null;
+      }
+
+      return {
+        score: 0.8,
+        evidence:
+          "PR intent is dead-code removal, but observable behavior changed",
+      };
+    },
+  },
+  {
     name: "monotonic_change",
     direction: "true-positive",
     confidence: "medium",
@@ -323,6 +578,27 @@ const truePositiveRules: readonly RubFakeRule[] = [
       }
 
       return null;
+    },
+  },
+  {
+    name: "rbac",
+    direction: "true-positive",
+    confidence: "medium",
+    sources: ["execution-log", "diff"],
+    evaluate(ctx: RuleContext): PatternMatch | null {
+      const mentionsRbac = rbacSignals.some((pattern) =>
+        pattern.test(`${intentText(ctx)}\n${ctx.executionLog}`),
+      );
+
+      if (!(touchesAccessControl(ctx) || mentionsRbac)) {
+        return null;
+      }
+
+      return {
+        score: 0.75,
+        evidence:
+          "Access-control behavior changed; RBAC failures are high-impact and context-sensitive",
+      };
     },
   },
 ];

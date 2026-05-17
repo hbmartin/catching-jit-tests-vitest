@@ -1,5 +1,6 @@
 import type { JiTTestConfig } from "../config.js";
 import { judgeCatchPrompt } from "../prompts/templates.js";
+import { judgeOutputSchema } from "../runtime-schemas.js";
 import type { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
@@ -22,17 +23,21 @@ async function singleModelJudge(
   });
 
   try {
-    return await llm.completeJson<JudgeOutput>({
-      prompt,
-      systemPrompt:
-        "You are an expert code reviewer. Classify test failures as expected or unexpected bugs.",
-    });
+    return await llm.completeJson<JudgeOutput>(
+      {
+        prompt,
+        systemPrompt:
+          "You are an expert code reviewer. Classify test failures as expected or unexpected bugs.",
+      },
+      judgeOutputSchema,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`LLM judge failed: ${message}`);
     return {
-      unexpectedLikelihood: "low",
-      explanation: "LLM judge failed to produce a result",
+      unexpectedLikelihood: "medium",
+      explanation:
+        "LLM judge failed to produce a result; treating this judge as neutral",
     };
   }
 }

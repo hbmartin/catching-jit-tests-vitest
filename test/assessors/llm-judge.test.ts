@@ -5,12 +5,21 @@ import type { JudgeOutput } from "../../source/assessors/types.js";
 import type { JiTTestConfig } from "../../source/config.js";
 import type { LLMClient } from "../../source/utils/llm-client.js";
 
-function makeLLMClient(responses: Record<string, JudgeOutput>): LLMClient {
-  const createClient = (model: string): LLMClient =>
-    ({
-      completeJson: vi.fn().mockResolvedValue(responses[model]),
+type JudgeResponse = JudgeOutput | Error;
+
+function makeLLMClient(responses: Record<string, JudgeResponse>): LLMClient {
+  const createClient = (model: string): LLMClient => {
+    const response = responses[model];
+    const completeJson =
+      response instanceof Error
+        ? vi.fn().mockRejectedValue(response)
+        : vi.fn().mockResolvedValue(response);
+
+    return {
+      completeJson,
       withModel: (nextModel: string) => createClient(nextModel),
-    }) as unknown as LLMClient;
+    } as unknown as LLMClient;
+  };
 
   return createClient("root");
 }
@@ -80,5 +89,25 @@ describe("ensembleJudge", () => {
     } as JiTTestConfig);
 
     expect(result.score).toBe(0);
+  });
+
+  it("treats failed model judgments as neutral", async () => {
+    const llm = makeLLMClient({
+      "model-a": new Error("provider unavailable"),
+      "model-b": {
+        unexpectedLikelihood: "high",
+        explanation: "Looks buggy.",
+      },
+      "model-c": {
+        unexpectedLikelihood: "low",
+        explanation: "Looks intended.",
+      },
+    });
+
+    const result = await ensembleJudge(input, llm, config);
+
+    expect(result.score).toBe(0);
+    expect(result.rationale).toContain("MEDIUM unexpected likelihood");
+    expect(result.rationale).toContain("treating this judge as neutral");
   });
 });

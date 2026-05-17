@@ -52,11 +52,14 @@ describe("inferRisksPrompt", () => {
     const prompt = inferRisksPrompt({
       prTitle: "Fix auth bug",
       prBody: "Fixes token validation",
+      additionalContext: "Issue says refresh tokens must remain valid.",
       rawDiff: "+if (token.expired) return null;",
     });
 
     expect(prompt).toContain("Fix auth bug");
     expect(prompt).toContain("Fixes token validation");
+    expect(prompt).toContain("Additional Change Context");
+    expect(prompt).toContain("refresh tokens");
     expect(prompt).toContain("token.expired");
     expect(prompt).toContain("risks");
   });

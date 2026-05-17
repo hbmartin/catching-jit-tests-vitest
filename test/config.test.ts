@@ -15,9 +15,18 @@ describe("createDefaultConfig", () => {
     expect(config.maxTotalTests).toBe(50);
     expect(config.workflow).toBe("both");
     expect(config.testTimeout).toBe(30_000);
+    expect(config.batchSize).toBe(10);
+    expect(config.parallelWorktrees).toBe(true);
     expect(config.rubfakeEnabled).toBe(true);
     expect(config.llmJudgeEnabled).toBe(true);
     expect(config.outputFormat).toBe("console");
+    expect(config.contextFiles).toEqual([]);
+    expect(config.include).toEqual(["src/**/*.ts", "source/**/*.ts"]);
+    expect(config.exclude).toEqual([
+      "**/*.test.ts",
+      "**/*.spec.ts",
+      "**/node_modules/**",
+    ]);
   });
 });
 
@@ -75,25 +84,67 @@ describe("parseCatchCommandOptions", () => {
     expect(options.workflow).toBe("both");
     expect(options.output).toBe("console");
     expect(options.cwd).toBe(".");
+    expect(options.contextFiles).toEqual([]);
+    expect(options.maxTotalTests).toBe(50);
+    expect(options.batchSize).toBe(10);
+    expect(options.parallelWorktrees).toBe(true);
+    expect(options.include).toEqual(["src/**/*.ts", "source/**/*.ts"]);
+    expect(options.exclude).toEqual([
+      "**/*.test.ts",
+      "**/*.spec.ts",
+      "**/node_modules/**",
+    ]);
   });
 
   it("coerces numeric values", () => {
     const options = parseCatchCommandOptions({
       riskThreshold: "0.4",
       testsPerFunction: "5",
+      maxTotalTests: "17",
+      batchSize: "4",
       timeout: "45000",
       reportThreshold: "-0.2",
     });
 
     expect(options.riskThreshold).toBe(0.4);
     expect(options.testsPerFunction).toBe(5);
+    expect(options.maxTotalTests).toBe(17);
+    expect(options.batchSize).toBe(4);
     expect(options.timeout).toBe(45_000);
     expect(options.reportThreshold).toBe(-0.2);
+  });
+
+  it("coerces boolean values", () => {
+    expect(
+      parseCatchCommandOptions({ parallelWorktrees: "false" })
+        .parallelWorktrees,
+    ).toBe(false);
+    expect(
+      parseCatchCommandOptions({ parallelWorktrees: "yes" }).parallelWorktrees,
+    ).toBe(true);
   });
 
   it("rejects blank base head and cwd values", () => {
     expect(() => parseCatchCommandOptions({ base: "   " })).toThrow();
     expect(() => parseCatchCommandOptions({ head: "" })).toThrow();
     expect(() => parseCatchCommandOptions({ cwd: " " })).toThrow();
+  });
+
+  it("accepts context files", () => {
+    const options = parseCatchCommandOptions({
+      contextFiles: ["issue.md", "docs/risk.md"],
+    });
+
+    expect(options.contextFiles).toEqual(["issue.md", "docs/risk.md"]);
+  });
+
+  it("accepts include and exclude globs", () => {
+    const options = parseCatchCommandOptions({
+      include: ["packages/*/src/**/*.ts"],
+      exclude: ["**/*.generated.ts"],
+    });
+
+    expect(options.include).toEqual(["packages/*/src/**/*.ts"]);
+    expect(options.exclude).toEqual(["**/*.generated.ts"]);
   });
 });

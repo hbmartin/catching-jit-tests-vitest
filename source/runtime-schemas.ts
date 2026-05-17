@@ -133,6 +133,14 @@ export const weakCatchSchema = z.object({
 
 export type WeakCatch = z.infer<typeof weakCatchSchema>;
 
+export const hardeningCandidateSchema = z.object({
+  test: generatedTestSchema,
+  parentResult: testResultSchema,
+  childResult: testResultSchema,
+});
+
+export type HardeningCandidate = z.infer<typeof hardeningCandidateSchema>;
+
 export const dualExecutionResultSchema = z.object({
   test: generatedTestSchema,
   parentOutcome: testResultSchema,
@@ -174,6 +182,13 @@ export const assessmentSchema = z.object({
 
 export type Assessment = z.infer<typeof assessmentSchema>;
 
+export const judgeOutputSchema = z.object({
+  unexpectedLikelihood: z.enum(["high", "medium", "low"]),
+  explanation: z.string(),
+});
+
+export type JudgeOutput = z.infer<typeof judgeOutputSchema>;
+
 export const aggregatedAssessmentSchema = z.object({
   assessments: z.array(assessmentSchema),
   combinedScore: z.number().min(-1).max(1),
@@ -201,6 +216,51 @@ export const assessmentBundleSchema = z.object({
 });
 
 export type AssessmentBundle = z.infer<typeof assessmentBundleSchema>;
+
+export const engineerFeedbackSchema = z.object({
+  label: z
+    .enum([
+      "unknown",
+      "confirmed-true-positive",
+      "confirmed-false-positive",
+      "intended-change",
+    ])
+    .default("unknown"),
+  dismissedAt: z.string().nullable().default(null),
+  dismissalSeconds: z.number().nonnegative().nullable().default(null),
+  notes: z.string().nullable().default(null),
+});
+
+export type EngineerFeedback = z.infer<typeof engineerFeedbackSchema>;
+
+export const assessmentFeedbackRecordSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  recordedAt: z.string(),
+  baseRef: z.string(),
+  headRef: z.string(),
+  workflow: workflowSchema,
+  riskScore: z.number().min(0).max(1),
+  pr: z.object({
+    title: z.string(),
+    body: z.string(),
+    branch: z.string(),
+    baseSha: z.string(),
+    headSha: z.string(),
+  }),
+  weakCatch: weakCatchSchema,
+  assessment: aggregatedAssessmentSchema,
+  engineerFeedback: engineerFeedbackSchema.default({
+    label: "unknown",
+    dismissedAt: null,
+    dismissalSeconds: null,
+    notes: null,
+  }),
+});
+
+export type AssessmentFeedbackRecord = z.infer<
+  typeof assessmentFeedbackRecordSchema
+>;
 
 export const behaviorReportDetailsSchema = z.object({
   behaviorChange: behaviorChangeSchema,
@@ -232,6 +292,7 @@ export const runStatsSchema = z.object({
   testsPassedOnParent: z.number().nonnegative(),
   testsFailedOnChild: z.number().nonnegative(),
   weakCatchCount: z.number().nonnegative(),
+  hardeningCandidateCount: z.number().nonnegative(),
   assessedAsTP: z.number().nonnegative(),
   assessedAsFP: z.number().nonnegative(),
   assessedAsUncertain: z.number().nonnegative(),
@@ -240,10 +301,12 @@ export const runStatsSchema = z.object({
     dodgyDiff: z.object({
       generated: z.number().nonnegative(),
       weakCatches: z.number().nonnegative(),
+      hardeningCandidates: z.number().nonnegative(),
     }),
     intentAware: z.object({
       generated: z.number().nonnegative(),
       weakCatches: z.number().nonnegative(),
+      hardeningCandidates: z.number().nonnegative(),
     }),
   }),
   llmCallCount: z.number().nonnegative(),

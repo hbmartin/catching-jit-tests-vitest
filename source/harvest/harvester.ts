@@ -1,7 +1,10 @@
 import type { DualExecutionResult } from "../execution/types.js";
-import { weakCatchSchema } from "../runtime-schemas.js";
+import {
+  hardeningCandidateSchema,
+  weakCatchSchema,
+} from "../runtime-schemas.js";
 
-import type { BehaviorChange, WeakCatch } from "./types.js";
+import type { BehaviorChange, HardeningCandidate, WeakCatch } from "./types.js";
 
 function isBooleanPair(
   expected: string | null,
@@ -112,4 +115,27 @@ function harvestWeakCatches(
     );
 }
 
-export { describeBehaviorChange, harvestWeakCatches, isBooleanPair };
+function harvestHardeningCandidates(
+  results: readonly DualExecutionResult[],
+): HardeningCandidate[] {
+  return results
+    .filter(
+      (result) =>
+        result.parentOutcome.status === "passed" &&
+        result.childOutcome.status === "passed",
+    )
+    .map((result) =>
+      hardeningCandidateSchema.parse({
+        test: result.test,
+        parentResult: result.parentOutcome,
+        childResult: result.childOutcome,
+      }),
+    );
+}
+
+export {
+  describeBehaviorChange,
+  harvestHardeningCandidates,
+  harvestWeakCatches,
+  isBooleanPair,
+};

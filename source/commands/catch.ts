@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+
 import { assessWeakCatch } from "../assessors/pipeline.js";
 import type { CatchCommandOptions } from "../config.js";
 import { loadConfig } from "../config.js";
@@ -12,10 +15,19 @@ import {
   dualExecution,
   validateIntentAwareTests,
 } from "../execution/runner.js";
+import {
+  appendAssessmentFeedbackRecord,
+  buildAssessmentFeedbackRecord,
+} from "../feedback/store.js";
 import { dodgyDiffWorkflow } from "../generation/dodgy-diff.js";
 import { intentAwareWorkflow } from "../generation/intent-aware.js";
+import { loadIntentContext } from "../generation/intent-context.js";
 import type { GeneratedTest } from "../generation/types.js";
-import { harvestWeakCatches } from "../harvest/harvester.js";
+import {
+  harvestHardeningCandidates,
+  harvestWeakCatches,
+} from "../harvest/harvester.js";
+import type { HardeningCandidate } from "../harvest/types.js";
 import { generateBehaviorReport } from "../reporting/behavior-change.js";
 import { formatCatchResult } from "../reporting/console.js";
 import { formatPRComment } from "../reporting/github-comment.js";
@@ -33,12 +45,12 @@ interface CatchCommandResult {
   diff: DiffContext;
   eligibleForGeneration: boolean;
   reports: readonly BehaviorReport[];
+  hardeningCandidates: readonly HardeningCandidate[];
   stats: RunStats | null;
   statusMessage?: string;
 }
 
 const writeStdout = (value: string): void => {
-  // biome-ignore lint/correctness/noProcessGlobal: CLI output is written in a Node runtime.
   process.stdout.write(`${value}\n`);
 };
 
@@ -47,9 +59,16 @@ const createCommandConfig = (options: CatchCommandOptions) =>
     workflow: options.workflow,
     riskThreshold: options.riskThreshold,
     testsPerFunction: options.testsPerFunction,
+    maxTotalTests: options.maxTotalTests,
+    batchSize: options.batchSize,
+    parallelWorktrees: options.parallelWorktrees,
     testTimeout: options.timeout,
     outputFormat: options.output,
     reportThreshold: options.reportThreshold,
+    feedbackPath: options.feedbackPath,
+    contextFiles: options.contextFiles,
+    include: options.include,
+    exclude: options.exclude,
   });
 
 const createResult = (
@@ -59,6 +78,7 @@ const createResult = (
   diff: DiffContext,
   eligibleForGeneration: boolean,
   reports: readonly BehaviorReport[],
+  hardeningCandidates: readonly HardeningCandidate[],
   stats: RunStats | null,
   statusMessage?: string,
 ): CatchCommandResult => ({
@@ -69,6 +89,7 @@ const createResult = (
   diff,
   eligibleForGeneration,
   reports,
+  hardeningCandidates,
   stats,
   statusMessage,
 });
@@ -87,10 +108,19 @@ const loadDiffWithRisk = async (
     cwd: options.cwd,
     prTitle: options.prTitle,
     prBody: options.prBody,
+    include: options.include,
+    exclude: options.exclude,
   });
+  const additionalContext = await loadIntentContext(
+    options.cwd,
+    options.contextFiles,
+  );
 
   return {
-    diff: await applyRiskAnalysis(options.cwd, diffContext),
+    diff: await applyRiskAnalysis(options.cwd, {
+      ...diffContext,
+      additionalContext,
+    }),
     diffMs: Date.now() - diffStart,
   };
 };
@@ -116,8 +146,16 @@ const generateTests = async (
     allTests.push(...(await intentAwareWorkflow(diff, repoRoot, llm, config)));
   }
 
+  if (allTests.length > config.maxTotalTests) {
+    logger.warn(
+      `Generated ${String(allTests.length)} tests; executing first ${String(
+        config.maxTotalTests,
+      )} because maxTotalTests is configured`,
+    );
+  }
+
   return {
-    allTests,
+    allTests: allTests.slice(0, config.maxTotalTests),
     genMs: Date.now() - genStart,
   };
 };
@@ -132,6 +170,7 @@ const buildRunStats = (input: {
   allTests: readonly GeneratedTest[];
   dualResults: Awaited<ReturnType<typeof dualExecution>>;
   weakCatches: ReturnType<typeof harvestWeakCatches>;
+  hardeningCandidates: ReturnType<typeof harvestHardeningCandidates>;
   reports: readonly BehaviorReport[];
   llmStats: ReturnType<LLMClient["getStats"]>;
 }): RunStats =>
@@ -154,6 +193,7 @@ const buildRunStats = (input: {
       (result) => result.childOutcome.status === "failed",
     ).length,
     weakCatchCount: input.weakCatches.length,
+    hardeningCandidateCount: input.hardeningCandidates.length,
     assessedAsTP: input.reports.length,
     assessedAsFP: input.weakCatches.length - input.reports.length,
     assessedAsUncertain: 0,
@@ -166,6 +206,9 @@ const buildRunStats = (input: {
         weakCatches: input.weakCatches.filter(
           (weakCatch) => weakCatch.test.workflow === "dodgy-diff",
         ).length,
+        hardeningCandidates: input.hardeningCandidates.filter(
+          (candidate) => candidate.test.workflow === "dodgy-diff",
+        ).length,
       },
       intentAware: {
         generated: input.allTests.filter(
@@ -173,6 +216,9 @@ const buildRunStats = (input: {
         ).length,
         weakCatches: input.weakCatches.filter(
           (weakCatch) => weakCatch.test.workflow === "intent-aware",
+        ).length,
+        hardeningCandidates: input.hardeningCandidates.filter(
+          (candidate) => candidate.test.workflow === "intent-aware",
         ).length,
       },
     },
@@ -190,6 +236,7 @@ const executeInWorktrees = async (input: {
 }): Promise<{
   dualResults: Awaited<ReturnType<typeof dualExecution>>;
   weakCatches: ReturnType<typeof harvestWeakCatches>;
+  hardeningCandidates: ReturnType<typeof harvestHardeningCandidates>;
   execMs: number;
 }> => {
   logger.info(
@@ -203,10 +250,15 @@ const executeInWorktrees = async (input: {
   );
 
   try {
-    await Promise.all([
-      installDependencies(worktrees.parentDir),
-      installDependencies(worktrees.childDir),
-    ]);
+    if (input.config.parallelWorktrees) {
+      await Promise.all([
+        installDependencies(worktrees.parentDir),
+        installDependencies(worktrees.childDir),
+      ]);
+    } else {
+      await installDependencies(worktrees.parentDir);
+      await installDependencies(worktrees.childDir);
+    }
 
     const executableTests = await validateIntentAwareTests(
       input.allTests,
@@ -221,15 +273,21 @@ const executeInWorktrees = async (input: {
       worktrees.childDir,
       input.config.batchSize,
       input.config.testTimeout,
+      input.config.parallelWorktrees,
     );
 
     logger.info("Harvesting weak catches...");
     const weakCatches = harvestWeakCatches(dualResults);
+    const hardeningCandidates = harvestHardeningCandidates(dualResults);
     logger.info(`Found ${String(weakCatches.length)} weak catches`);
+    logger.info(
+      `Found ${String(hardeningCandidates.length)} hardening candidates`,
+    );
 
     return {
       dualResults,
       weakCatches,
+      hardeningCandidates,
       execMs: Date.now() - execStart,
     };
   } finally {
@@ -237,11 +295,47 @@ const executeInWorktrees = async (input: {
   }
 };
 
+const recordAssessmentFeedback = async (input: {
+  options: CatchCommandOptions;
+  config: ReturnType<typeof createCommandConfig>;
+  runId: string;
+  recordedAt: string;
+  diff: DiffContext;
+  weakCatch: ReturnType<typeof harvestWeakCatches>[number];
+  assessment: Awaited<ReturnType<typeof assessWeakCatch>>;
+}): Promise<void> => {
+  const feedbackPath = path.resolve(
+    input.options.cwd,
+    input.config.feedbackPath,
+  );
+
+  try {
+    await appendAssessmentFeedbackRecord(
+      feedbackPath,
+      buildAssessmentFeedbackRecord({
+        runId: input.runId,
+        recordedAt: input.recordedAt,
+        baseRef: input.options.base,
+        headRef: input.options.head,
+        workflow: input.config.workflow,
+        diff: input.diff,
+        weakCatch: input.weakCatch,
+        assessment: input.assessment,
+      }),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`Failed to record assessment feedback: ${message}`);
+  }
+};
+
 const assessWeakCatches = async (input: {
+  options: CatchCommandOptions;
   weakCatches: ReturnType<typeof harvestWeakCatches>;
   diff: DiffContext;
   llm: LLMClient;
   config: ReturnType<typeof createCommandConfig>;
+  runId: string;
 }): Promise<{
   reports: readonly BehaviorReport[];
   assessMs: number;
@@ -250,6 +344,7 @@ const assessWeakCatches = async (input: {
   const reports: BehaviorReport[] = [];
 
   for (const weakCatch of input.weakCatches) {
+    const recordedAt = new Date().toISOString();
     const assessment = await assessWeakCatch(
       weakCatch,
       input.diff,
@@ -257,6 +352,15 @@ const assessWeakCatches = async (input: {
       input.llm,
       input.config,
     );
+    await recordAssessmentFeedback({
+      options: input.options,
+      config: input.config,
+      runId: input.runId,
+      recordedAt,
+      diff: input.diff,
+      weakCatch,
+      assessment,
+    });
 
     if (assessment.shouldReport) {
       reports.push(generateBehaviorReport(assessment, weakCatch));
@@ -278,8 +382,10 @@ const executeCatchWorkflow = async (input: {
   diffMs: number;
   genMs: number;
   startTime: number;
+  runId: string;
 }): Promise<{
   reports: readonly BehaviorReport[];
+  hardeningCandidates: readonly HardeningCandidate[];
   stats: RunStats;
 }> => {
   const executed = await executeInWorktrees({
@@ -288,14 +394,17 @@ const executeCatchWorkflow = async (input: {
     allTests: input.allTests,
   });
   const assessed = await assessWeakCatches({
+    options: input.options,
     weakCatches: executed.weakCatches,
     diff: input.diff,
     llm: input.llm,
     config: input.config,
+    runId: input.runId,
   });
 
   return {
     reports: assessed.reports,
+    hardeningCandidates: executed.hardeningCandidates,
     stats: buildRunStats({
       diff: input.diff,
       diffMs: input.diffMs,
@@ -306,6 +415,7 @@ const executeCatchWorkflow = async (input: {
       allTests: input.allTests,
       dualResults: executed.dualResults,
       weakCatches: executed.weakCatches,
+      hardeningCandidates: executed.hardeningCandidates,
       reports: assessed.reports,
       llmStats: input.llm.getStats(),
     }),
@@ -324,6 +434,7 @@ const createSkippedResult = (
     diff,
     false,
     [],
+    [],
     null,
     "Skipped because the risk score is below the threshold.",
   );
@@ -340,6 +451,7 @@ const createNoTestsResult = (
     diff,
     true,
     [],
+    [],
     null,
     "No tests were generated for the current diff.",
   );
@@ -348,6 +460,7 @@ export const createCatchCommandResult = async (
   options: CatchCommandOptions,
 ): Promise<CatchCommandResult> => {
   const startTime = Date.now();
+  const runId = randomUUID();
   const config = createCommandConfig(options);
   const llm = new LLMClient(config.llm);
   const { diff, diffMs } = await loadDiffWithRisk(options);
@@ -376,6 +489,7 @@ export const createCatchCommandResult = async (
     diffMs,
     genMs,
     startTime,
+    runId,
   });
 
   return createResult(
@@ -385,6 +499,7 @@ export const createCatchCommandResult = async (
     diff,
     true,
     executed.reports,
+    executed.hardeningCandidates,
     executed.stats,
   );
 };
@@ -410,7 +525,12 @@ export const runCatchCommand = async (
 
   if (options.output === "json") {
     writeStdout(
-      formatJsonReport(result.reports, result.stats, result.statusMessage),
+      formatJsonReport(
+        result.reports,
+        result.stats,
+        result.statusMessage,
+        result.hardeningCandidates,
+      ),
     );
 
     return;
@@ -428,6 +548,7 @@ export const runCatchCommand = async (
       riskReasons: result.diff.riskReasons ?? [],
       totalTestsGenerated: result.stats?.totalTestsGenerated,
       weakCatchCount: result.stats?.weakCatchCount,
+      hardeningCandidateCount: result.stats?.hardeningCandidateCount,
       reportsGenerated: result.stats?.reportsGenerated,
       duration: result.stats?.duration,
       estimatedCost: result.stats?.estimatedCost,

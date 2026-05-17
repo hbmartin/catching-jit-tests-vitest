@@ -53,3 +53,30 @@ describe("setupWorktrees", () => {
     });
   });
 });
+
+describe("buildPackageManagerExecCommand", () => {
+  it("builds package-manager specific vitest exec commands", async () => {
+    const { buildPackageManagerExecCommand } = await import(
+      "../../source/execution/git-worktree.js"
+    );
+
+    expect(
+      buildPackageManagerExecCommand("pnpm", "vitest", ["run", "a.test.ts"]),
+    ).toEqual({
+      command: "pnpm",
+      args: ["exec", "vitest", "run", "a.test.ts"],
+    });
+    expect(
+      buildPackageManagerExecCommand("npm", "vitest", ["run", "a.test.ts"]),
+    ).toEqual({
+      command: "npm",
+      args: ["exec", "--", "vitest", "run", "a.test.ts"],
+    });
+    expect(
+      buildPackageManagerExecCommand("yarn", "vitest", ["run", "a.test.ts"]),
+    ).toEqual({
+      command: "yarn",
+      args: ["vitest", "run", "a.test.ts"],
+    });
+  });
+});

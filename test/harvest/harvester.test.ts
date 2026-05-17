@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { DualExecutionResult } from "../../source/execution/types.js";
 import {
   describeBehaviorChange,
+  harvestHardeningCandidates,
   harvestWeakCatches,
   isBooleanPair,
 } from "../../source/harvest/harvester.js";
@@ -92,6 +93,21 @@ describe("harvestWeakCatches", () => {
 
     const catches = harvestWeakCatches(results);
     expect(catches).toHaveLength(0);
+  });
+});
+
+describe("harvestHardeningCandidates", () => {
+  it("identifies generated tests that pass on parent and child", () => {
+    const results = [
+      makeDualResult("passed", "failed"),
+      makeDualResult("passed", "passed"),
+      makeDualResult("failed", "failed"),
+      makeDualResult("passed", "passed"),
+    ];
+
+    const candidates = harvestHardeningCandidates(results);
+    expect(candidates).toHaveLength(2);
+    expect(candidates[0]?.test.testFilePath).toBe("test/foo.test.ts");
   });
 });
 

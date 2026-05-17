@@ -67,6 +67,32 @@ describe("runCli", () => {
     );
   });
 
+  it("passes execution and file filter options through catch options", async () => {
+    await runCli([
+      "catch",
+      "--max-total-tests",
+      "12",
+      "--batch-size",
+      "3",
+      "--parallel-worktrees",
+      "false",
+      "--include",
+      "packages/*/src/**/*.ts",
+      "--exclude",
+      "**/*.generated.ts",
+    ]);
+
+    expect(runCatchCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        maxTotalTests: 12,
+        batchSize: 3,
+        parallelWorktrees: false,
+        include: ["packages/*/src/**/*.ts"],
+        exclude: ["**/*.generated.ts"],
+      }),
+    );
+  });
+
   it("throws on unknown commands", async () => {
     await expect(runCli(["unknown"])).rejects.toThrow("Unknown command");
   });

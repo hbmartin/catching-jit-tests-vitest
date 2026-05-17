@@ -1,6 +1,6 @@
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -208,7 +208,9 @@ describe("computeRiskScore", () => {
 describe("computeRiskAnalysis", () => {
   it("logs a warning and omits defect history when git history cannot be read", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "risk-scorer-"));
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
 
     try {
       const diff = makeDiffContext({

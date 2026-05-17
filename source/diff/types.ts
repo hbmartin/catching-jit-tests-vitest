@@ -47,6 +47,7 @@ interface ChangedFile {
 
 interface DiffContext {
   readonly rawDiff: string;
+  readonly additionalContext?: string;
   readonly pr: {
     readonly title: string;
     readonly body: string;

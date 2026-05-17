@@ -17,6 +17,7 @@ describe("formatJsonReport", () => {
       version: cliVersion,
       stats: null,
       reports: [],
+      hardeningCandidates: [],
       statusMessage: "No tests were generated for the current diff.",
     });
   });

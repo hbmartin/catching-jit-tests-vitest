@@ -7,8 +7,9 @@ import {
 } from "../runtime-schemas.js";
 import { chunk } from "../utils/concurrency.js";
 import { logger } from "../utils/logger.js";
-import { CommandError, runCommand } from "../utils/process.js";
+import { CommandError } from "../utils/process.js";
 
+import { runPackageManagerExec } from "./git-worktree.js";
 import { parseVitestJsonOutput } from "./result-parser.js";
 import type { DualExecutionResult, TestResult } from "./types.js";
 
@@ -125,17 +126,16 @@ async function runVitest(
       );
     }
 
-    const result = await runCommand(
-      "npx",
+    const result = await runPackageManagerExec(
+      projectDir,
+      "vitest",
       [
-        "vitest",
         "run",
         "--reporter=json",
         "--no-color",
         ...testFiles.map((file) => file.testFilePath),
       ],
       {
-        cwd: projectDir,
         timeout,
         maxBuffer: 10 * 1024 * 1024,
         env: {
@@ -269,6 +269,7 @@ async function dualExecution(
   childDir: string,
   batchSize: number,
   testTimeout: number,
+  parallelWorktrees = true,
 ): Promise<DualExecutionResult[]> {
   const results: DualExecutionResult[] = [];
   const batches = chunk(tests, batchSize);
@@ -276,10 +277,15 @@ async function dualExecution(
   for (const batch of batches) {
     logger.info(`Running batch of ${String(batch.length)} tests`);
 
-    const [parentResults, childResults] = await Promise.all([
-      runVitest(parentDir, batch, testTimeout),
-      runVitest(childDir, batch, testTimeout),
-    ]);
+    const [parentResults, childResults] = parallelWorktrees
+      ? await Promise.all([
+          runVitest(parentDir, batch, testTimeout),
+          runVitest(childDir, batch, testTimeout),
+        ])
+      : [
+          await runVitest(parentDir, batch, testTimeout),
+          await runVitest(childDir, batch, testTimeout),
+        ];
 
     const batchResults = batch
       .filter((test): test is GeneratedTest => Boolean(test))

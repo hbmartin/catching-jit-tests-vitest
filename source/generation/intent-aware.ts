@@ -24,6 +24,7 @@ async function inferDiffRisks(
   const prompt = inferRisksPrompt({
     prTitle: diff.pr.title,
     prBody: diff.pr.body,
+    additionalContext: diff.additionalContext,
     rawDiff: diff.rawDiff,
   });
 

@@ -35,17 +35,29 @@ export type {
   FailureAnalysis,
   TestResult,
 } from "./execution/types.js";
+export {
+  appendAssessmentFeedbackRecord,
+  buildAssessmentFeedbackRecord,
+} from "./feedback/store.js";
 export { dodgyDiffWorkflow } from "./generation/dodgy-diff.js";
 export { intentAwareWorkflow } from "./generation/intent-aware.js";
+export {
+  loadIntentContext,
+  truncateContext,
+} from "./generation/intent-context.js";
 export type {
   GeneratedTest,
   GenerationResult,
   InferredRisk,
   MutantCandidate,
 } from "./generation/types.js";
-export { harvestWeakCatches } from "./harvest/harvester.js";
+export {
+  harvestHardeningCandidates,
+  harvestWeakCatches,
+} from "./harvest/harvester.js";
 export type {
   BehaviorChange,
+  HardeningCandidate,
   WeakCatch,
 } from "./harvest/types.js";
 export { generateBehaviorReport } from "./reporting/behavior-change.js";
@@ -60,15 +72,23 @@ export type {
   BehaviorReport,
   RunStats,
 } from "./reporting/types.js";
+export type {
+  AssessmentFeedbackRecord,
+  EngineerFeedback,
+} from "./runtime-schemas.js";
 export {
   aggregatedAssessmentSchema,
+  assessmentFeedbackRecordSchema,
   behaviorChangeSchema,
   behaviorReportSchema,
   dualExecutionResultSchema,
+  engineerFeedbackSchema,
   failureAnalysisSchema,
   generatedTestSchema,
+  hardeningCandidateSchema,
   inferRisksResponseSchema,
   inferredRiskSchema,
+  judgeOutputSchema,
   reportCommandResultSchema,
   runStatsSchema,
   testResultSchema,
