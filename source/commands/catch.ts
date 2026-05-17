@@ -21,6 +21,7 @@ import {
 } from "../feedback/store.js";
 import { dodgyDiffWorkflow } from "../generation/dodgy-diff.js";
 import { intentAwareWorkflow } from "../generation/intent-aware.js";
+import { loadIntentContext } from "../generation/intent-context.js";
 import type { GeneratedTest } from "../generation/types.js";
 import {
   harvestHardeningCandidates,
@@ -62,6 +63,7 @@ const createCommandConfig = (options: CatchCommandOptions) =>
     outputFormat: options.output,
     reportThreshold: options.reportThreshold,
     feedbackPath: options.feedbackPath,
+    contextFiles: options.contextFiles,
   });
 
 const createResult = (
@@ -102,9 +104,16 @@ const loadDiffWithRisk = async (
     prTitle: options.prTitle,
     prBody: options.prBody,
   });
+  const additionalContext = await loadIntentContext(
+    options.cwd,
+    options.contextFiles,
+  );
 
   return {
-    diff: await applyRiskAnalysis(options.cwd, diffContext),
+    diff: await applyRiskAnalysis(options.cwd, {
+      ...diffContext,
+      additionalContext,
+    }),
     diffMs: Date.now() - diffStart,
   };
 };

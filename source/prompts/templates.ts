@@ -71,8 +71,14 @@ Return ONLY the test file content as a single TypeScript code block. Include a J
 function inferRisksPrompt(vars: {
   prTitle: string;
   prBody: string;
+  additionalContext?: string;
   rawDiff: string;
 }): string {
+  const additionalContextSection =
+    vars.additionalContext && vars.additionalContext.trim().length > 0
+      ? `\n## Additional Change Context\n${vars.additionalContext}`
+      : "";
+
   return `You are analyzing a code change (diff) to identify risks — ways the implementation could introduce bugs.
 
 ## PR Title
@@ -80,6 +86,7 @@ ${vars.prTitle}
 
 ## PR Description
 ${vars.prBody}
+${additionalContextSection}
 
 ## Code Diff
 \`\`\`diff

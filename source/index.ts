@@ -41,6 +41,10 @@ export {
 } from "./feedback/store.js";
 export { dodgyDiffWorkflow } from "./generation/dodgy-diff.js";
 export { intentAwareWorkflow } from "./generation/intent-aware.js";
+export {
+  loadIntentContext,
+  truncateContext,
+} from "./generation/intent-context.js";
 export type {
   GeneratedTest,
   GenerationResult,

@@ -18,6 +18,7 @@ describe("createDefaultConfig", () => {
     expect(config.rubfakeEnabled).toBe(true);
     expect(config.llmJudgeEnabled).toBe(true);
     expect(config.outputFormat).toBe("console");
+    expect(config.contextFiles).toEqual([]);
   });
 });
 
@@ -75,6 +76,7 @@ describe("parseCatchCommandOptions", () => {
     expect(options.workflow).toBe("both");
     expect(options.output).toBe("console");
     expect(options.cwd).toBe(".");
+    expect(options.contextFiles).toEqual([]);
   });
 
   it("coerces numeric values", () => {
@@ -95,5 +97,13 @@ describe("parseCatchCommandOptions", () => {
     expect(() => parseCatchCommandOptions({ base: "   " })).toThrow();
     expect(() => parseCatchCommandOptions({ head: "" })).toThrow();
     expect(() => parseCatchCommandOptions({ cwd: " " })).toThrow();
+  });
+
+  it("accepts context files", () => {
+    const options = parseCatchCommandOptions({
+      contextFiles: ["issue.md", "docs/risk.md"],
+    });
+
+    expect(options.contextFiles).toEqual(["issue.md", "docs/risk.md"]);
   });
 });

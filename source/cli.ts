@@ -27,6 +27,7 @@ catch options
   --output <format>        console | json | github-comment
   --report-threshold <n>   Minimum score to report
   --feedback-path <path>   JSONL file for assessor feedback records
+  --context-file <path>    Extra local context file for intent analysis
   --pr-title <text>        Pull request title for intent-aware analysis
   --pr-body <text>         Pull request body for intent-aware analysis
   --cwd <path>             Repository root (default: .)
@@ -61,6 +62,7 @@ const parseCatchOptions = (argv: readonly string[]) => {
       output: { type: "string" },
       "report-threshold": { type: "string" },
       "feedback-path": { type: "string" },
+      "context-file": { type: "string", multiple: true },
       "pr-title": { type: "string" },
       "pr-body": { type: "string" },
       cwd: { type: "string" },
@@ -84,6 +86,7 @@ const parseCatchOptions = (argv: readonly string[]) => {
     output: parsed.values.output,
     reportThreshold: parsed.values["report-threshold"],
     feedbackPath: parsed.values["feedback-path"],
+    contextFiles: parsed.values["context-file"],
     prTitle: parsed.values["pr-title"],
     prBody: parsed.values["pr-body"],
     cwd: parsed.values.cwd,
