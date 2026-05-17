@@ -269,6 +269,7 @@ async function dualExecution(
   childDir: string,
   batchSize: number,
   testTimeout: number,
+  parallelWorktrees = true,
 ): Promise<DualExecutionResult[]> {
   const results: DualExecutionResult[] = [];
   const batches = chunk(tests, batchSize);
@@ -276,10 +277,15 @@ async function dualExecution(
   for (const batch of batches) {
     logger.info(`Running batch of ${String(batch.length)} tests`);
 
-    const [parentResults, childResults] = await Promise.all([
-      runVitest(parentDir, batch, testTimeout),
-      runVitest(childDir, batch, testTimeout),
-    ]);
+    const [parentResults, childResults] = parallelWorktrees
+      ? await Promise.all([
+          runVitest(parentDir, batch, testTimeout),
+          runVitest(childDir, batch, testTimeout),
+        ])
+      : [
+          await runVitest(parentDir, batch, testTimeout),
+          await runVitest(childDir, batch, testTimeout),
+        ];
 
     const batchResults = batch
       .filter((test): test is GeneratedTest => Boolean(test))

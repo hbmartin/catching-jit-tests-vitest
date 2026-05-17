@@ -23,6 +23,11 @@ catch options
   --workflow <name>        dodgy-diff | intent-aware | both
   --risk-threshold <num>   Minimum risk score required for generation
   --tests-per-function <n> Candidates per changed function
+  --max-total-tests <n>    Maximum generated tests to execute
+  --batch-size <n>         Generated tests per execution batch
+  --parallel-worktrees <b> Run parent/child installs and tests in parallel
+  --include <glob>         Changed file glob to include
+  --exclude <glob>         Changed file glob to exclude
   --timeout <ms>           Per-test timeout
   --output <format>        console | json | github-comment
   --report-threshold <n>   Minimum score to report
@@ -58,6 +63,11 @@ const parseCatchOptions = (argv: readonly string[]) => {
       workflow: { type: "string" },
       "risk-threshold": { type: "string" },
       "tests-per-function": { type: "string" },
+      "max-total-tests": { type: "string" },
+      "batch-size": { type: "string" },
+      "parallel-worktrees": { type: "string" },
+      include: { type: "string", multiple: true },
+      exclude: { type: "string", multiple: true },
       timeout: { type: "string" },
       output: { type: "string" },
       "report-threshold": { type: "string" },
@@ -82,6 +92,11 @@ const parseCatchOptions = (argv: readonly string[]) => {
     workflow: parsed.values.workflow,
     riskThreshold: parsed.values["risk-threshold"],
     testsPerFunction: parsed.values["tests-per-function"],
+    maxTotalTests: parsed.values["max-total-tests"],
+    batchSize: parsed.values["batch-size"],
+    parallelWorktrees: parsed.values["parallel-worktrees"],
+    include: parsed.values.include,
+    exclude: parsed.values.exclude,
     timeout: parsed.values.timeout,
     output: parsed.values.output,
     reportThreshold: parsed.values["report-threshold"],

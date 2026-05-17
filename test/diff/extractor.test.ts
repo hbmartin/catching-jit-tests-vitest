@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   extractChangedSymbols,
+  matchesFileFilters,
   parseHunks,
   resolveChangedFunctions,
 } from "../../source/diff/extractor.js";
@@ -60,6 +61,31 @@ describe("parseHunks", () => {
     const hunks = parseHunks(diff);
     expect(hunks[0]?.oldLines).toBe(1);
     expect(hunks[0]?.newLines).toBe(1);
+  });
+});
+
+describe("matchesFileFilters", () => {
+  it("matches default source globs and excludes tests", () => {
+    expect(matchesFileFilters("source/auth.ts")).toBe(true);
+    expect(matchesFileFilters("src/session/token.ts")).toBe(true);
+    expect(matchesFileFilters("source/auth.test.ts")).toBe(false);
+    expect(matchesFileFilters("source/node_modules/pkg/index.ts")).toBe(false);
+    expect(matchesFileFilters("docs/example.ts")).toBe(false);
+  });
+
+  it("supports custom include and exclude globs", () => {
+    expect(
+      matchesFileFilters("packages/api/src/auth.ts", {
+        include: ["packages/*/src/**/*.ts"],
+        exclude: ["**/*.generated.ts"],
+      }),
+    ).toBe(true);
+    expect(
+      matchesFileFilters("packages/api/src/schema.generated.ts", {
+        include: ["packages/*/src/**/*.ts"],
+        exclude: ["**/*.generated.ts"],
+      }),
+    ).toBe(false);
   });
 });
 

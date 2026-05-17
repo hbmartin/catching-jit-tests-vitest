@@ -22,6 +22,30 @@ function makeTest(
   };
 }
 
+function makeVitestOutput(
+  testFile: string,
+  status: "passed" | "failed" = "passed",
+): string {
+  return JSON.stringify({
+    testResults: [
+      {
+        name: testFile,
+        status,
+        assertionResults: [
+          {
+            ancestorTitles: ["suite"],
+            title: "result",
+            status,
+            failureMessages:
+              status === "failed" ? ["Expected: true\nReceived: false"] : [],
+            duration: 1,
+          },
+        ],
+      },
+    ],
+  });
+}
+
 afterEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -29,6 +53,74 @@ afterEach(async () => {
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
   );
+});
+
+describe("dualExecution", () => {
+  it("runs parent before child when parallel worktrees are disabled", async () => {
+    const parentDir = await mkdtemp(path.join(tmpdir(), "parent-runner-"));
+    const childDir = await mkdtemp(path.join(tmpdir(), "child-runner-"));
+    tempDirs.push(parentDir, childDir);
+
+    let resolveParentRun: (result: { stdout: string; stderr: string }) => void =
+      () => undefined;
+    const parentRun = new Promise<{ stdout: string; stderr: string }>(
+      (resolve) => {
+        resolveParentRun = resolve;
+      },
+    );
+    const runCommandMock = vi
+      .fn()
+      .mockReturnValueOnce(parentRun)
+      .mockResolvedValueOnce({
+        stdout: makeVitestOutput(path.join(childDir, "test/seq.test.ts")),
+        stderr: "",
+      });
+
+    vi.doMock("../../source/utils/process.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/utils/process.js")
+      >("../../source/utils/process.js");
+
+      return {
+        ...actual,
+        runCommand: runCommandMock,
+      };
+    });
+
+    const { dualExecution } = await import("../../source/execution/runner.js");
+    const execution = dualExecution(
+      [makeTest("test/seq.test.ts")],
+      parentDir,
+      childDir,
+      1,
+      1000,
+      false,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(runCommandMock).toHaveBeenCalledTimes(1);
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      1,
+      "npx",
+      expect.any(Array),
+      expect.objectContaining({ cwd: parentDir }),
+    );
+
+    resolveParentRun({
+      stdout: makeVitestOutput(path.join(parentDir, "test/seq.test.ts")),
+      stderr: "",
+    });
+
+    await execution;
+
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      2,
+      "npx",
+      expect.any(Array),
+      expect.objectContaining({ cwd: childDir }),
+    );
+  });
 });
 
 describe("runVitest", () => {

@@ -59,11 +59,16 @@ const createCommandConfig = (options: CatchCommandOptions) =>
     workflow: options.workflow,
     riskThreshold: options.riskThreshold,
     testsPerFunction: options.testsPerFunction,
+    maxTotalTests: options.maxTotalTests,
+    batchSize: options.batchSize,
+    parallelWorktrees: options.parallelWorktrees,
     testTimeout: options.timeout,
     outputFormat: options.output,
     reportThreshold: options.reportThreshold,
     feedbackPath: options.feedbackPath,
     contextFiles: options.contextFiles,
+    include: options.include,
+    exclude: options.exclude,
   });
 
 const createResult = (
@@ -103,6 +108,8 @@ const loadDiffWithRisk = async (
     cwd: options.cwd,
     prTitle: options.prTitle,
     prBody: options.prBody,
+    include: options.include,
+    exclude: options.exclude,
   });
   const additionalContext = await loadIntentContext(
     options.cwd,
@@ -139,8 +146,16 @@ const generateTests = async (
     allTests.push(...(await intentAwareWorkflow(diff, repoRoot, llm, config)));
   }
 
+  if (allTests.length > config.maxTotalTests) {
+    logger.warn(
+      `Generated ${String(allTests.length)} tests; executing first ${String(
+        config.maxTotalTests,
+      )} because maxTotalTests is configured`,
+    );
+  }
+
   return {
-    allTests,
+    allTests: allTests.slice(0, config.maxTotalTests),
     genMs: Date.now() - genStart,
   };
 };
@@ -235,10 +250,15 @@ const executeInWorktrees = async (input: {
   );
 
   try {
-    await Promise.all([
-      installDependencies(worktrees.parentDir),
-      installDependencies(worktrees.childDir),
-    ]);
+    if (input.config.parallelWorktrees) {
+      await Promise.all([
+        installDependencies(worktrees.parentDir),
+        installDependencies(worktrees.childDir),
+      ]);
+    } else {
+      await installDependencies(worktrees.parentDir);
+      await installDependencies(worktrees.childDir);
+    }
 
     const executableTests = await validateIntentAwareTests(
       input.allTests,
@@ -253,6 +273,7 @@ const executeInWorktrees = async (input: {
       worktrees.childDir,
       input.config.batchSize,
       input.config.testTimeout,
+      input.config.parallelWorktrees,
     );
 
     logger.info("Harvesting weak catches...");
