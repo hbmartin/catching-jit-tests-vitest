@@ -10,3 +10,12 @@ package-lock.json
 yarn.lock
 report/
 .jittest/
+
+# Local model-comparison artifacts
+/*_claude.ts
+/*_codex.ts
+/gem_compare_ratings.sqlite
+/gem_diffs.sh
+/triage_decisions.db
+/prompts/
+/reviews_triage/

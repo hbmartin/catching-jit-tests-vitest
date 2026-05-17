@@ -97,9 +97,8 @@ describe("dualExecution", () => {
       false,
     );
 
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await vi.waitFor(() => expect(runCommandMock).toHaveBeenCalledTimes(1));
 
-    expect(runCommandMock).toHaveBeenCalledTimes(1);
     expect(runCommandMock).toHaveBeenNthCalledWith(
       1,
       "npm",
