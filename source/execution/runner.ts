@@ -7,8 +7,9 @@ import {
 } from "../runtime-schemas.js";
 import { chunk } from "../utils/concurrency.js";
 import { logger } from "../utils/logger.js";
-import { CommandError, runCommand } from "../utils/process.js";
+import { CommandError } from "../utils/process.js";
 
+import { runPackageManagerExec } from "./git-worktree.js";
 import { parseVitestJsonOutput } from "./result-parser.js";
 import type { DualExecutionResult, TestResult } from "./types.js";
 
@@ -125,17 +126,16 @@ async function runVitest(
       );
     }
 
-    const result = await runCommand(
-      "npx",
+    const result = await runPackageManagerExec(
+      projectDir,
+      "vitest",
       [
-        "vitest",
         "run",
         "--reporter=json",
         "--no-color",
         ...testFiles.map((file) => file.testFilePath),
       ],
       {
-        cwd: projectDir,
         timeout,
         maxBuffer: 10 * 1024 * 1024,
         env: {

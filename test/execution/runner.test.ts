@@ -102,7 +102,7 @@ describe("dualExecution", () => {
     expect(runCommandMock).toHaveBeenCalledTimes(1);
     expect(runCommandMock).toHaveBeenNthCalledWith(
       1,
-      "npx",
+      "npm",
       expect.any(Array),
       expect.objectContaining({ cwd: parentDir }),
     );
@@ -116,7 +116,7 @@ describe("dualExecution", () => {
 
     expect(runCommandMock).toHaveBeenNthCalledWith(
       2,
-      "npx",
+      "npm",
       expect.any(Array),
       expect.objectContaining({ cwd: childDir }),
     );
@@ -127,6 +127,11 @@ describe("runVitest", () => {
   it("indexes outcomes by file path instead of reporter order", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
     tempDirs.push(tempDir);
+    await writeFile(
+      path.join(tempDir, "package.json"),
+      JSON.stringify({ packageManager: "pnpm@9.0.0" }),
+      "utf-8",
+    );
     const runCommandMock = vi.fn().mockResolvedValue({
       stdout: JSON.stringify({
         testResults: [
@@ -181,6 +186,11 @@ describe("runVitest", () => {
       result.results.get(path.join(tempDir, "test/bad.jittest.test.ts"))
         ?.failureMessage,
     ).toContain("Unexpected token");
+    expect(runCommandMock).toHaveBeenCalledWith(
+      "pnpm",
+      expect.arrayContaining(["exec", "vitest", "run"]),
+      expect.objectContaining({ cwd: tempDir }),
+    );
   });
 });
 

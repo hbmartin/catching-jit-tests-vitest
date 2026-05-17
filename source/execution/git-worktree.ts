@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
-import { CommandError, runCommand } from "../utils/process.js";
+import {
+  CommandError,
+  type RunCommandOptions,
+  type RunCommandResult,
+  runCommand,
+} from "../utils/process.js";
 
 import type { WorktreeSetup } from "./types.js";
 
@@ -231,18 +236,50 @@ function buildPackageManagerCommand(manager: PackageManager): {
   command: string;
   args: readonly string[];
 } {
-  const installArgs = packageManagerInstallArgs[manager];
+  return buildPackageManagerShellCommand(
+    manager,
+    packageManagerInstallArgs[manager],
+  );
+}
+
+function buildPackageManagerShellCommand(
+  manager: PackageManager,
+  args: readonly string[],
+): {
+  command: string;
+  args: readonly string[];
+} {
   if (process.platform === "win32") {
     return {
       command: "cmd.exe",
-      args: ["/d", "/s", "/c", [manager, ...installArgs].join(" ")],
+      args: ["/d", "/s", "/c", [manager, ...args].join(" ")],
     };
   }
 
   return {
     command: manager,
-    args: installArgs,
+    args,
   };
+}
+
+function buildPackageManagerExecCommand(
+  manager: PackageManager,
+  executable: string,
+  args: readonly string[],
+): {
+  command: string;
+  args: readonly string[];
+} {
+  let execArgs: readonly string[];
+  if (manager === "npm") {
+    execArgs = ["exec", "--", executable, ...args];
+  } else if (manager === "pnpm") {
+    execArgs = ["exec", executable, ...args];
+  } else {
+    execArgs = [executable, ...args];
+  }
+
+  return buildPackageManagerShellCommand(manager, execArgs);
 }
 
 async function runPackageManagerInstall(
@@ -251,6 +288,36 @@ async function runPackageManagerInstall(
 ): Promise<void> {
   const { command, args } = buildPackageManagerCommand(manager);
   await execInDir(command, args, projectDir);
+}
+
+async function runPackageManagerExec(
+  projectDir: string,
+  executable: string,
+  args: readonly string[],
+  options: Omit<RunCommandOptions, "cwd"> = {},
+): Promise<RunCommandResult> {
+  const { preferred, fallbacks } = await detectPackageManagerOrder(projectDir);
+  let lastError: unknown;
+
+  for (const manager of [preferred, ...fallbacks]) {
+    try {
+      const command = buildPackageManagerExecCommand(manager, executable, args);
+      return await runCommand(command.command, command.args, {
+        ...options,
+        cwd: projectDir,
+      });
+    } catch (error) {
+      if (!isMissingPackageManagerError(error, manager)) {
+        throw error;
+      }
+      logger.info(
+        `Falling back from missing ${manager} while running ${executable}`,
+      );
+      lastError = error;
+    }
+  }
+
+  throw lastError;
 }
 
 function isMissingPackageManagerError(
@@ -274,4 +341,11 @@ function isMissingPackageManagerError(
   );
 }
 
-export { installDependencies, setupWorktrees };
+export type { PackageManager };
+export {
+  buildPackageManagerExecCommand,
+  detectPackageManagerOrder,
+  installDependencies,
+  runPackageManagerExec,
+  setupWorktrees,
+};
