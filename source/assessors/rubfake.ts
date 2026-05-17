@@ -40,15 +40,14 @@ const notImplementedPatterns = [
 
 const dataProviderFailurePatterns = [
   /data provider/i,
-  /test\.each/i,
-  /describe\.each/i,
   /Invalid test cases/i,
+  /each table must be an array/i,
 ];
+const parameterizedTestPattern = /\b(?:describe|it|test)\.each\b/;
 
 const undefinedVariablePatterns = [
   /ReferenceError: .+ is not defined/,
   /Cannot find name '(.+)'/,
-  /is not defined/,
 ];
 
 const flakinessPatterns = [
@@ -92,10 +91,10 @@ const keyFailurePatterns = [
 
 const createFailurePatterns = [
   /cannot construct/i,
-  /constructor/i,
   /failed to create/i,
   /cannot instantiate/i,
   /is not a constructor/i,
+  /Cannot read (?:properties|property) of .+ \(reading ['"]constructor['"]\)/i,
 ];
 
 const refactorSignals = [
@@ -133,18 +132,12 @@ const rbacSignals = [
   /authorization/i,
 ];
 const diffChangedLinePattern = /^[+-]/;
-const booleanLogicPattern = /\b(true|false)\b|!|&&|\|\||===|!==|<=|>=|<|>/;
+const booleanLogicPattern =
+  /\b(true|false)\b|!|&&|\|\||===|!==|<=|>=|(?:\s[<>]\s)/;
 const nullishPattern = /\b(null|undefined)\b/;
 
 function diffText(ctx: RuleContext): string {
-  return [
-    ctx.diff.rawDiff,
-    ctx.diff.files
-      .map((file) => file.hunks.map((hunk) => hunk.content).join("\n"))
-      .join("\n"),
-  ]
-    .filter((value) => value.length > 0)
-    .join("\n");
+  return ctx.diff.rawDiff;
 }
 
 function intentText(ctx: RuleContext): string {
@@ -271,11 +264,10 @@ const falsePositiveRules: readonly RubFakeRule[] = [
     confidence: "high",
     sources: ["execution-log", "test-code"],
     evaluate(ctx: RuleContext): PatternMatch | null {
-      const combined = `${ctx.executionLog}\n${ctx.testCode}`;
       const matched = dataProviderFailurePatterns.some((pattern) =>
-        pattern.test(combined),
+        pattern.test(ctx.executionLog),
       );
-      if (!matched) {
+      if (!(matched && parameterizedTestPattern.test(ctx.testCode))) {
         return null;
       }
 
@@ -294,7 +286,10 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       const matched = undefinedVariablePatterns.some((pattern) =>
         pattern.test(ctx.executionLog),
       );
-      if (!matched) {
+      const errorInGeneratedTest = ctx.executionLog.includes(
+        ctx.weakCatch.test.testFilePath,
+      );
+      if (!(matched && errorInGeneratedTest)) {
         return null;
       }
 

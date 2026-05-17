@@ -101,7 +101,7 @@ describe("assessment feedback store", () => {
     });
 
     expect(record).toMatchObject({
-      id: "63182598e6d2e96e",
+      id: "fb4d2ce3b91966cd",
       engineerFeedback: {
         label: "unknown",
         dismissedAt: null,
@@ -109,6 +109,31 @@ describe("assessment feedback store", () => {
         notes: null,
       },
     });
+  });
+
+  it("includes workflow in deterministic feedback IDs", () => {
+    const dodgyRecord = buildAssessmentFeedbackRecord({
+      runId: "run-1",
+      recordedAt: "2026-05-17T00:00:00.000Z",
+      baseRef: "origin/main",
+      headRef: "HEAD",
+      workflow: "dodgy-diff",
+      diff,
+      weakCatch,
+      assessment,
+    });
+    const bothRecord = buildAssessmentFeedbackRecord({
+      runId: "run-1",
+      recordedAt: "2026-05-17T00:00:00.000Z",
+      baseRef: "origin/main",
+      headRef: "HEAD",
+      workflow: "both",
+      diff,
+      weakCatch,
+      assessment,
+    });
+
+    expect(dodgyRecord.id).not.toBe(bothRecord.id);
   });
 
   it("appends JSONL feedback records", async () => {

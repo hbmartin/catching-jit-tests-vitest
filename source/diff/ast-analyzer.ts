@@ -2,8 +2,25 @@ import ts from "typescript";
 
 import type { ASTAnalysis, FunctionInfo, SignatureChange } from "./types.js";
 
+interface FunctionEntry {
+  readonly fn: FunctionInfo;
+  readonly index: number;
+}
+
+interface FunctionPair {
+  readonly parent?: FunctionEntry;
+  readonly child?: FunctionEntry;
+}
+
 function createMatchKey(name: string, occurrence: number): string {
   return `${name}:${String(occurrence)}`;
+}
+
+function withMatchKey(fn: FunctionInfo, matchKey: string): FunctionInfo {
+  return {
+    ...fn,
+    matchKey,
+  };
 }
 
 function getMethodContainerName(node: ts.MethodDeclaration): string | null {
@@ -61,24 +78,22 @@ function extractVariableSignature(
   initializer: ts.ArrowFunction | ts.FunctionExpression,
   sourceFile: ts.SourceFile,
 ): string {
+  const signatureStart =
+    statement.declarationList.declarations.length === 1
+      ? statement.getStart(sourceFile)
+      : initializer.parent.getStart(sourceFile);
   return sourceFile.text
-    .slice(
-      statement.getStart(sourceFile),
-      initializer.body.getStart(sourceFile),
-    )
+    .slice(signatureStart, initializer.body.getStart(sourceFile))
     .trim();
 }
 
 function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
   const functions: FunctionInfo[] = [];
-  const occurrencesByName = new Map<string, number>();
 
   function pushFunction(fn: Omit<FunctionInfo, "matchKey">): void {
-    const nextOccurrence = (occurrencesByName.get(fn.name) ?? 0) + 1;
-    occurrencesByName.set(fn.name, nextOccurrence);
     functions.push({
       ...fn,
-      matchKey: createMatchKey(fn.name, nextOccurrence),
+      matchKey: createMatchKey(fn.name, functions.length + 1),
     });
   }
 
@@ -128,7 +143,7 @@ function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
           const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
           pushFunction({
             name: decl.name.text,
-            body: node.getText(sourceFile),
+            body: decl.getText(sourceFile),
             signature: extractVariableSignature(
               node,
               decl.initializer,
@@ -253,6 +268,159 @@ function hasErrorHandlingDifference(
   return countTryCatch(parentSource) !== countTryCatch(childSource);
 }
 
+function groupFunctionsByName(
+  functions: readonly FunctionInfo[],
+): Map<string, FunctionEntry[]> {
+  const groups = new Map<string, FunctionEntry[]>();
+  functions.forEach((fn, index) => {
+    const group = groups.get(fn.name) ?? [];
+    group.push({ fn, index });
+    groups.set(fn.name, group);
+  });
+  return groups;
+}
+
+function tokenize(value: string): Set<string> {
+  return new Set(value.match(/[A-Za-z0-9_]+/g) ?? []);
+}
+
+function bodySimilarity(left: string, right: string): number {
+  const leftTokens = tokenize(left);
+  const rightTokens = tokenize(right);
+  if (leftTokens.size === 0 && rightTokens.size === 0) {
+    return 1;
+  }
+
+  let common = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      common += 1;
+    }
+  }
+
+  return common / new Set([...leftTokens, ...rightTokens]).size;
+}
+
+function scoreFunctionPair(parent: FunctionInfo, child: FunctionInfo): number {
+  const lineDistance = Math.abs(parent.startLine - child.startLine);
+  return (
+    (parent.signature === child.signature ? 100 : 0) +
+    bodySimilarity(parent.body, child.body) * 20 -
+    Math.min(lineDistance, 50) / 10
+  );
+}
+
+function pairFunctionGroup(
+  parentGroup: readonly FunctionEntry[],
+  childGroup: readonly FunctionEntry[],
+): FunctionPair[] {
+  const pairs: FunctionPair[] = [];
+  const pairedParents = new Set<number>();
+  const pairedChildren = new Set<number>();
+
+  for (const child of childGroup) {
+    const exactParent = parentGroup.find(
+      (parent) =>
+        !pairedParents.has(parent.index) && parent.fn.body === child.fn.body,
+    );
+    if (exactParent) {
+      pairs.push({ parent: exactParent, child });
+      pairedParents.add(exactParent.index);
+      pairedChildren.add(child.index);
+    }
+  }
+
+  const candidates = parentGroup.flatMap((parent) =>
+    childGroup.map((child) => ({
+      parent,
+      child,
+      score: scoreFunctionPair(parent.fn, child.fn),
+    })),
+  );
+  candidates.sort((left, right) => right.score - left.score);
+
+  for (const candidate of candidates) {
+    const isAlreadyPaired =
+      pairedParents.has(candidate.parent.index) ||
+      pairedChildren.has(candidate.child.index);
+    if (!isAlreadyPaired) {
+      pairs.push({
+        parent: candidate.parent,
+        child: candidate.child,
+      });
+      pairedParents.add(candidate.parent.index);
+      pairedChildren.add(candidate.child.index);
+    }
+  }
+
+  for (const parent of parentGroup) {
+    if (!pairedParents.has(parent.index)) {
+      pairs.push({ parent });
+    }
+  }
+  for (const child of childGroup) {
+    if (!pairedChildren.has(child.index)) {
+      pairs.push({ child });
+    }
+  }
+
+  return pairs.sort((left, right) => {
+    const parentDelta =
+      (left.parent?.index ?? Number.MAX_SAFE_INTEGER) -
+      (right.parent?.index ?? Number.MAX_SAFE_INTEGER);
+    if (parentDelta !== 0) {
+      return parentDelta;
+    }
+
+    return (
+      (left.child?.index ?? Number.MAX_SAFE_INTEGER) -
+      (right.child?.index ?? Number.MAX_SAFE_INTEGER)
+    );
+  });
+}
+
+function stabilizeFunctionMatchKeys(
+  parentFunctions: readonly FunctionInfo[],
+  childFunctions: readonly FunctionInfo[],
+): {
+  parentFunctions: readonly FunctionInfo[];
+  childFunctions: readonly FunctionInfo[];
+} {
+  const parentGroups = groupFunctionsByName(parentFunctions);
+  const childGroups = groupFunctionsByName(childFunctions);
+  const names = new Set([...parentGroups.keys(), ...childGroups.keys()]);
+  const stableParents: FunctionInfo[] = [];
+  const stableChildren: FunctionInfo[] = [];
+
+  for (const name of names) {
+    const pairs = pairFunctionGroup(
+      parentGroups.get(name) ?? [],
+      childGroups.get(name) ?? [],
+    );
+
+    pairs.forEach((pair, index) => {
+      const matchKey = createMatchKey(name, index + 1);
+      if (pair.parent) {
+        stableParents[pair.parent.index] = withMatchKey(
+          pair.parent.fn,
+          matchKey,
+        );
+      }
+      if (pair.child) {
+        stableChildren[pair.child.index] = withMatchKey(
+          pair.child.fn,
+          matchKey,
+        );
+      }
+    });
+  }
+
+  return {
+    parentFunctions: stableParents.filter(Boolean),
+    childFunctions: stableChildren.filter(Boolean),
+  };
+}
+
 function diffFunctionSignatures(
   parentFunctions: readonly FunctionInfo[],
   childFunctions: readonly FunctionInfo[],
@@ -296,8 +464,12 @@ function analyzeFileChanges(
     true,
   );
 
-  const parentFunctions = extractFunctions(parentAST);
-  const childFunctions = extractFunctions(childAST);
+  const rawParentFunctions = extractFunctions(parentAST);
+  const rawChildFunctions = extractFunctions(childAST);
+  const { parentFunctions, childFunctions } = stabilizeFunctionMatchKeys(
+    rawParentFunctions,
+    rawChildFunctions,
+  );
 
   const parentExports = extractExportNames(parentAST);
   const childExports = extractExportNames(childAST);
@@ -315,6 +487,8 @@ function analyzeFileChanges(
 
   return {
     modifiedFunctions,
+    parentFunctions,
+    childFunctions,
     addedExports,
     removedExports,
     changedSignatures: diffFunctionSignatures(parentFunctions, childFunctions),

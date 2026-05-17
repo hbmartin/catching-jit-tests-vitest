@@ -102,6 +102,21 @@ const render = (
     );
   });
 
+  it("extracts variable signatures from the matching declarator", () => {
+    const source = `const first = () => "one", second = () => "two";`;
+    const sf = ts.createSourceFile(
+      "test.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const functions = extractFunctions(sf);
+
+    expect(functions[1]?.name).toBe("second");
+    expect(functions[1]?.signature).toBe("second = () =>");
+    expect(functions[1]?.body).not.toContain("first");
+  });
+
   it("returns empty for files without functions", () => {
     const source = `const x = 42;
 type Foo = string;`;
@@ -226,5 +241,60 @@ function second() {
 
     expect(helperChanges).toHaveLength(1);
     expect(helperChanges[0]?.body).toContain(`return "three"`);
+  });
+
+  it("keeps duplicate function pairings stable when an earlier duplicate is inserted", () => {
+    const parent = `function first() {
+  function helper() {
+    return "one";
+  }
+
+  return helper();
+}
+
+function second() {
+  function helper() {
+    return "two";
+  }
+
+  return helper();
+}`;
+    const child = `function inserted() {
+  function helper() {
+    return "zero";
+  }
+
+  return helper();
+}
+
+function first() {
+  function helper() {
+    return "one";
+  }
+
+  return helper();
+}
+
+function second() {
+  function helper() {
+    return "three";
+  }
+
+  return helper();
+}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    const changedHelper = analysis.modifiedFunctions.find((fn) =>
+      fn.body.includes(`return "three"`),
+    );
+    const parentMatch = analysis.parentFunctions.find(
+      (fn) => fn.matchKey === changedHelper?.matchKey,
+    );
+
+    expect(changedHelper).toBeDefined();
+    expect(parentMatch?.body).toContain(`return "two"`);
+    expect(
+      analysis.modifiedFunctions.some((fn) => fn.body.includes(`return "one"`)),
+    ).toBe(false);
   });
 });

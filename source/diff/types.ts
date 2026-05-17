@@ -79,6 +79,8 @@ interface FunctionInfo {
 
 interface ASTAnalysis {
   readonly modifiedFunctions: readonly FunctionInfo[];
+  readonly parentFunctions: readonly FunctionInfo[];
+  readonly childFunctions: readonly FunctionInfo[];
   readonly addedExports: readonly string[];
   readonly removedExports: readonly string[];
   readonly changedSignatures: readonly SignatureChange[];

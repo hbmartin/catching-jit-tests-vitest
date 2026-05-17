@@ -87,6 +87,21 @@ describe("matchesFileFilters", () => {
       }),
     ).toBe(false);
   });
+
+  it("supports brace and character-class glob features", () => {
+    expect(
+      matchesFileFilters("packages/api/src/auth.ts", {
+        include: ["packages/{api,web}/src/**/*.ts"],
+        exclude: [],
+      }),
+    ).toBe(true);
+    expect(
+      matchesFileFilters("source/auth.ts", {
+        include: ["source/[ab]uth.ts"],
+        exclude: [],
+      }),
+    ).toBe(true);
+  });
 });
 
 describe("extractChangedSymbols", () => {

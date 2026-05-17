@@ -1,11 +1,11 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
-import ts from "typescript";
+import picomatch from "picomatch";
 
 import { defaultExcludePatterns, defaultIncludePatterns } from "../config.js";
 import { CommandError, runCommand } from "../utils/process.js";
 
-import { analyzeFileChanges, extractFunctions } from "./ast-analyzer.js";
+import { analyzeFileChanges } from "./ast-analyzer.js";
 import type {
   ChangedFile,
   ChangedFunction,
@@ -16,7 +16,7 @@ import type {
 } from "./types.js";
 
 const hunkHeaderRegex = /^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/;
-const regexSpecialCharacterPattern = /[.+^${}()|[\]\\]/;
+const globOptions = { dot: true } as const;
 interface DiffFileFilters {
   readonly include: readonly string[];
   readonly exclude: readonly string[];
@@ -30,36 +30,8 @@ function parseHunkLineCount(value: string | undefined): number {
   return Number.parseInt(value, 10);
 }
 
-function escapeRegexCharacter(char: string): string {
-  return regexSpecialCharacterPattern.test(char) ? `\\${char}` : char;
-}
-
 function globToRegExp(pattern: string): RegExp {
-  const normalizedPattern = pattern.replaceAll("\\", "/");
-  let regexSource = "";
-
-  for (let i = 0; i < normalizedPattern.length; i += 1) {
-    const char = normalizedPattern[i];
-    const next = normalizedPattern[i + 1];
-
-    if (char === "*" && next === "*") {
-      if (normalizedPattern[i + 2] === "/") {
-        regexSource += "(?:.*/)?";
-        i += 2;
-      } else {
-        regexSource += ".*";
-        i += 1;
-      }
-    } else if (char === "*") {
-      regexSource += "[^/]*";
-    } else if (char === "?") {
-      regexSource += "[^/]";
-    } else {
-      regexSource += escapeRegexCharacter(char ?? "");
-    }
-  }
-
-  return new RegExp(`^${regexSource}$`);
+  return picomatch.makeRe(pattern.replaceAll("\\", "/"), globOptions);
 }
 
 function matchesAnyGlob(
@@ -67,7 +39,11 @@ function matchesAnyGlob(
   patterns: readonly string[],
 ): boolean {
   const normalizedPath = filePath.replaceAll("\\", "/");
-  return patterns.some((pattern) => globToRegExp(pattern).test(normalizedPath));
+  return picomatch.isMatch(
+    normalizedPath,
+    patterns.map((pattern) => pattern.replaceAll("\\", "/")),
+    globOptions,
+  );
 }
 
 function matchesFileFilters(
@@ -283,12 +259,8 @@ async function buildChangedFunctions(
   const parentText = parentSource ?? "";
   const childText = childSource;
   const analysis = analyzeFileChanges(parentText, childText, filePath);
-  const parentFunctions = indexFunctionsByMatchKey(
-    extractFunctions(analyzeSourceFile(filePath, parentText)),
-  );
-  const childFunctions = indexFunctionsByMatchKey(
-    extractFunctions(analyzeSourceFile(filePath, childText)),
-  );
+  const parentFunctions = indexFunctionsByMatchKey(analysis.parentFunctions);
+  const childFunctions = indexFunctionsByMatchKey(analysis.childFunctions);
 
   return resolveChangedFunctions({
     filePath,
@@ -299,15 +271,6 @@ async function buildChangedFunctions(
     childText,
     hunks,
   });
-}
-
-function analyzeSourceFile(filePath: string, sourceText: string) {
-  return ts.createSourceFile(
-    filePath,
-    sourceText,
-    ts.ScriptTarget.Latest,
-    true,
-  );
 }
 
 function indexFunctionsByMatchKey(

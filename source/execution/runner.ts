@@ -18,11 +18,31 @@ interface VitestRunResult {
   readonly executionLog: string;
 }
 
+function resolveProjectPath(projectDir: string, relativePath: string): string {
+  const root = path.resolve(projectDir);
+  if (relativePath.trim().length === 0 || path.isAbsolute(relativePath)) {
+    throw new Error(`Path must be project-relative: ${relativePath}`);
+  }
+
+  const resolved = path.resolve(root, relativePath);
+  const relative = path.relative(root, resolved);
+  if (
+    relative === "" ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  ) {
+    throw new Error(`Path escapes project root: ${relativePath}`);
+  }
+
+  return resolved;
+}
+
 async function writeTestFile(
   projectDir: string,
   test: GeneratedTest,
 ): Promise<string> {
-  const fullPath = path.join(projectDir, test.testFilePath);
+  const fullPath = resolveProjectPath(projectDir, test.testFilePath);
   const dir = path.dirname(fullPath);
   await mkdir(dir, { recursive: true });
   await writeFile(fullPath, test.code, "utf-8");
@@ -33,11 +53,11 @@ async function removeTestFile(
   projectDir: string,
   test: GeneratedTest,
 ): Promise<void> {
-  const fullPath = path.join(projectDir, test.testFilePath);
   try {
+    const fullPath = resolveProjectPath(projectDir, test.testFilePath);
     await unlink(fullPath);
   } catch {
-    // File might not exist
+    // File might not exist, or generation may have produced an unsafe path.
   }
 }
 
@@ -61,15 +81,18 @@ async function applySourceOverride(
   projectDir: string,
   override: SourceOverride,
 ): Promise<SourceOverrideBackup> {
-  const fullPath = path.join(projectDir, override.filePath);
+  const fullPath = resolveProjectPath(projectDir, override.filePath);
   const dir = path.dirname(fullPath);
   await mkdir(dir, { recursive: true });
 
   let originalCode: string | null = null;
   try {
     originalCode = await readFile(fullPath, "utf-8");
-  } catch {
-    originalCode = null;
+  } catch (error) {
+    const { code } = error as NodeJS.ErrnoException;
+    if (code !== "ENOENT") {
+      throw error;
+    }
   }
 
   await writeFile(fullPath, override.code, "utf-8");
@@ -84,7 +107,7 @@ async function restoreSourceOverride(
   projectDir: string,
   backup: SourceOverrideBackup,
 ): Promise<void> {
-  const fullPath = path.join(projectDir, backup.filePath);
+  const fullPath = resolveProjectPath(projectDir, backup.filePath);
 
   if (backup.originalCode === null) {
     try {
@@ -96,6 +119,22 @@ async function restoreSourceOverride(
   }
 
   await writeFile(fullPath, backup.originalCode, "utf-8");
+}
+
+async function restoreSourceOverrides(
+  projectDir: string,
+  backups: readonly SourceOverrideBackup[],
+): Promise<void> {
+  for (const backup of [...backups].reverse()) {
+    try {
+      await restoreSourceOverride(projectDir, backup);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `Failed to restore source override ${backup.filePath}: ${message}`,
+      );
+    }
+  }
 }
 
 function mapResultsByFile(
@@ -116,6 +155,10 @@ async function runVitest(
   timeout: number,
   sourceOverrides: readonly SourceOverride[] = [],
 ): Promise<VitestRunResult> {
+  for (const sourceOverride of sourceOverrides) {
+    resolveProjectPath(projectDir, sourceOverride.filePath);
+  }
+
   const overrideBackups: SourceOverrideBackup[] = [];
 
   try {
@@ -194,11 +237,7 @@ async function runVitest(
       executionLog: errorLog,
     };
   } finally {
-    await Promise.all(
-      overrideBackups.map((backup) =>
-        restoreSourceOverride(projectDir, backup),
-      ),
-    );
+    await restoreSourceOverrides(projectDir, overrideBackups);
     await Promise.all(
       testFiles.map((test) => removeTestFile(projectDir, test)),
     );
@@ -216,51 +255,101 @@ function buildDefaultOutcome(test: GeneratedTest): TestResult {
   });
 }
 
+interface MutantValidationGroup {
+  readonly targetFilePath: string;
+  readonly mutantCode: string;
+  readonly tests: GeneratedTest[];
+}
+
+function createMutantValidationKey(test: GeneratedTest): string | null {
+  if (test.workflow !== "intent-aware" || !test.mutantValidation) {
+    return null;
+  }
+
+  return JSON.stringify([
+    test.mutantValidation.targetFilePath,
+    test.mutantValidation.mutantCode,
+  ]);
+}
+
 async function validateIntentAwareTests(
   tests: readonly GeneratedTest[],
   parentDir: string,
   timeout: number,
 ): Promise<GeneratedTest[]> {
-  const validatedTests: GeneratedTest[] = [];
+  const validatedTests = new Set<GeneratedTest>();
+  const intentAwareTests: GeneratedTest[] = [];
 
   for (const test of tests) {
-    const shouldValidate =
-      test.workflow === "intent-aware" && Boolean(test.mutantValidation);
+    const validationKey = createMutantValidationKey(test);
+    if (validationKey && test.mutantValidation) {
+      intentAwareTests.push(test);
+    } else {
+      validatedTests.add(test);
+    }
+  }
 
-    if (shouldValidate && test.mutantValidation) {
+  try {
+    if (intentAwareTests.length === 0) {
+      return [...tests];
+    }
+
+    const parentRun = await runVitest(parentDir, intentAwareTests, timeout);
+    const groups = new Map<string, MutantValidationGroup>();
+
+    for (const test of intentAwareTests) {
       const resultKey = normalizeResultPath(parentDir, test.testFilePath);
-      const parentRun = await runVitest(parentDir, [test], timeout);
       const parentOutcome =
         parentRun.results.get(resultKey) ?? buildDefaultOutcome(test);
-
       if (parentOutcome.status === "passed") {
-        const mutantRun = await runVitest(parentDir, [test], timeout, [
-          {
-            filePath: test.mutantValidation.targetFilePath,
-            code: test.mutantValidation.mutantCode,
-          },
-        ]);
-        const mutantOutcome =
-          mutantRun.results.get(resultKey) ?? buildDefaultOutcome(test);
-
-        if (mutantOutcome.status === "failed") {
-          validatedTests.push(test);
-        } else {
-          logger.info(
-            `Discarding ${test.testFilePath}: generated test does not kill inferred mutant`,
-          );
+        const validationKey = createMutantValidationKey(test);
+        if (validationKey && test.mutantValidation) {
+          const group = groups.get(validationKey) ?? {
+            targetFilePath: test.mutantValidation.targetFilePath,
+            mutantCode: test.mutantValidation.mutantCode,
+            tests: [],
+          };
+          group.tests.push(test);
+          groups.set(validationKey, group);
         }
       } else {
         logger.info(
           `Discarding ${test.testFilePath}: generated test does not pass on parent`,
         );
       }
-    } else {
-      validatedTests.push(test);
     }
+
+    for (const group of groups.values()) {
+      const mutantRun = await runVitest(parentDir, group.tests, timeout, [
+        {
+          filePath: group.targetFilePath,
+          code: group.mutantCode,
+        },
+      ]);
+
+      for (const test of group.tests) {
+        const resultKey = normalizeResultPath(parentDir, test.testFilePath);
+        const mutantOutcome =
+          mutantRun.results.get(resultKey) ?? buildDefaultOutcome(test);
+
+        if (mutantOutcome.status === "failed") {
+          validatedTests.add(test);
+        } else {
+          logger.info(
+            `Discarding ${test.testFilePath}: generated test does not kill inferred mutant`,
+          );
+        }
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(
+      `Intent-aware validation failed; executing generated tests without pre-validation: ${message}`,
+    );
+    return [...tests];
   }
 
-  return validatedTests;
+  return tests.filter((test) => validatedTests.has(test));
 }
 
 async function dualExecution(

@@ -56,6 +56,8 @@ function describeBehaviorChange(result: DualExecutionResult): BehaviorChange {
     };
   }
 
+  // Assertion matchers like toThrow express expected exception behavior; only
+  // generic runtime failures indicate a newly introduced exception.
   if (failure.isRuntimeError && failure.assertionType === "other") {
     return {
       summary: "Code that previously succeeded now throws an error",

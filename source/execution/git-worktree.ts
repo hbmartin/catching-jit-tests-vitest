@@ -19,6 +19,7 @@ const packageManagerInstallArgs: Record<PackageManager, readonly string[]> = {
   pnpm: ["install", "--frozen-lockfile"],
   yarn: ["install", "--frozen-lockfile"],
 };
+const windowsShellUnsafePattern = /["&|<>^%!\r\n]/;
 
 async function execInDir(
   command: string,
@@ -63,25 +64,20 @@ async function setupWorktrees(
 
   logger.info(`Setting up worktrees in ${workDir}`);
 
-  let parentCreated = false;
-
   try {
     await execInDir("git", ["worktree", "add", parentDir, baseSha], repoRoot);
-    parentCreated = true;
     await execInDir("git", ["worktree", "add", childDir, headSha], repoRoot);
   } catch (error) {
-    if (parentCreated) {
-      await removeWorktree(
-        repoRoot,
-        childDir,
-        "Failed to remove child worktree after setup error",
-      );
-      await removeWorktree(
-        repoRoot,
-        parentDir,
-        "Failed to remove parent worktree after setup error",
-      );
-    }
+    await removeWorktree(
+      repoRoot,
+      childDir,
+      "Failed to remove child worktree after setup error",
+    );
+    await removeWorktree(
+      repoRoot,
+      parentDir,
+      "Failed to remove parent worktree after setup error",
+    );
 
     try {
       await rm(workDir, { recursive: true, force: true });
@@ -245,14 +241,15 @@ function buildPackageManagerCommand(manager: PackageManager): {
 function buildPackageManagerShellCommand(
   manager: PackageManager,
   args: readonly string[],
+  platform = process.platform,
 ): {
   command: string;
   args: readonly string[];
 } {
-  if (process.platform === "win32") {
+  if (platform === "win32") {
     return {
       command: "cmd.exe",
-      args: ["/d", "/s", "/c", [manager, ...args].join(" ")],
+      args: ["/d", "/s", "/c", buildWindowsCommandLine([manager, ...args])],
     };
   }
 
@@ -266,6 +263,7 @@ function buildPackageManagerExecCommand(
   manager: PackageManager,
   executable: string,
   args: readonly string[],
+  platform = process.platform,
 ): {
   command: string;
   args: readonly string[];
@@ -279,7 +277,19 @@ function buildPackageManagerExecCommand(
     execArgs = [executable, ...args];
   }
 
-  return buildPackageManagerShellCommand(manager, execArgs);
+  return buildPackageManagerShellCommand(manager, execArgs, platform);
+}
+
+function quoteWindowsCommandArg(arg: string): string {
+  if (windowsShellUnsafePattern.test(arg)) {
+    throw new Error(`Unsafe Windows shell argument: ${arg}`);
+  }
+
+  return `"${arg}"`;
+}
+
+function buildWindowsCommandLine(args: readonly string[]): string {
+  return args.map((arg) => quoteWindowsCommandArg(arg)).join(" ");
 }
 
 async function runPackageManagerInstall(

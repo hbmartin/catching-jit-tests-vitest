@@ -155,9 +155,25 @@ describe("evaluateRubFake", () => {
     expect(result.score).toBeLessThan(0);
   });
 
+  it("does not treat normal parameterized tests as broken data providers", () => {
+    const ctx = makeContext({
+      testCode: "test.each([[1], [2]])('case %#', () => {})",
+      executionLog: "Expected: true\nReceived: false",
+    });
+
+    const result = evaluateRubFake(ctx);
+
+    expect(
+      result.detectedPatterns.some(
+        (pattern) => pattern.name === "data_provider_broken",
+      ),
+    ).toBe(false);
+  });
+
   it("detects undefined variables as false positives", () => {
     const ctx = makeContext({
-      executionLog: "ReferenceError: missingValue is not defined",
+      executionLog:
+        "ReferenceError: missingValue is not defined\n    at test/foo.test.ts:1:1",
     });
 
     const result = evaluateRubFake(ctx);
@@ -167,6 +183,58 @@ describe("evaluateRubFake", () => {
       ),
     ).toBe(true);
     expect(result.score).toBeLessThan(0);
+  });
+
+  it("does not blame production ReferenceErrors on generated tests", () => {
+    const ctx = makeContext({
+      executionLog:
+        "ReferenceError: missingValue is not defined\n    at source/foo.ts:1:1",
+    });
+
+    const result = evaluateRubFake(ctx);
+
+    expect(
+      result.detectedPatterns.some(
+        (pattern) => pattern.name === "undefined_variable",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not treat generic constructor mentions as creation failures", () => {
+    const ctx = makeContext({
+      weakCatch: {
+        ...makeContext().weakCatch,
+        behaviorChange: {
+          summary: "Other behavior changed",
+          parentBehavior: "A",
+          childBehavior: "B",
+          changeType: "other",
+        },
+      },
+      executionLog: "expected constructor metadata to be preserved",
+    });
+
+    const result = evaluateRubFake(ctx);
+
+    expect(
+      result.detectedPatterns.some(
+        (pattern) => pattern.name === "create_failure",
+      ),
+    ).toBe(false);
+  });
+
+  it("does not lower boolean confidence for generic type syntax", () => {
+    const ctx = makeContext({
+      diff: {
+        ...makeContext().diff,
+        rawDiff: "+type Box<T> = { value: T };",
+      },
+    });
+
+    const result = evaluateRubFake(ctx);
+
+    expect(result.score).toBe(0.7);
+    expect(result.rationale).not.toContain("directly changes boolean logic");
   });
 
   it("detects refactor intent with behavior change as true positive", () => {

@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -191,10 +198,29 @@ describe("runVitest", () => {
       expect.objectContaining({ cwd: tempDir }),
     );
   });
+
+  it("rejects source overrides that escape the project root", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
+    tempDirs.push(tempDir);
+
+    const { runVitest } = await import("../../source/execution/runner.js");
+    const escapedName = `${path.basename(tempDir)}-escaped.ts`;
+    const escapedPath = path.resolve(tempDir, `../${escapedName}`);
+
+    await expect(
+      runVitest(tempDir, [makeTest("test/safe.jittest.test.ts")], 1000, [
+        {
+          filePath: `../${escapedName}`,
+          code: "export const unsafe = true;\n",
+        },
+      ]),
+    ).rejects.toThrow("Path escapes project root");
+    await expect(access(escapedPath)).rejects.toThrow();
+  });
 });
 
 describe("validateIntentAwareTests", () => {
-  it("discards tests that do not kill the inferred mutant and restores source files", async () => {
+  it("batches tests by mutant, discards weak tests, and restores source files", async () => {
     const tempDir = await mkdtemp(path.join(tmpdir(), "validate-test-"));
     tempDirs.push(tempDir);
 
@@ -209,6 +235,19 @@ describe("validateIntentAwareTests", () => {
           testResults: [
             {
               name: path.join(tempDir, "test/kept.jittest.test.ts"),
+              status: "passed",
+              assertionResults: [
+                {
+                  ancestorTitles: ["suite"],
+                  title: "passes on parent",
+                  status: "passed",
+                  failureMessages: [],
+                  duration: 1,
+                },
+              ],
+            },
+            {
+              name: path.join(tempDir, "test/dropped.jittest.test.ts"),
               status: "passed",
               assertionResults: [
                 {
@@ -240,13 +279,6 @@ describe("validateIntentAwareTests", () => {
                 },
               ],
             },
-          ],
-        }),
-        stderr: "",
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          testResults: [
             {
               name: path.join(tempDir, "test/dropped.jittest.test.ts"),
               status: "passed",
@@ -254,26 +286,6 @@ describe("validateIntentAwareTests", () => {
                 {
                   ancestorTitles: ["suite"],
                   title: "passes on parent",
-                  status: "passed",
-                  failureMessages: [],
-                  duration: 1,
-                },
-              ],
-            },
-          ],
-        }),
-        stderr: "",
-      })
-      .mockResolvedValueOnce({
-        stdout: JSON.stringify({
-          testResults: [
-            {
-              name: path.join(tempDir, "test/dropped.jittest.test.ts"),
-              status: "passed",
-              assertionResults: [
-                {
-                  ancestorTitles: ["suite"],
-                  title: "still passes on mutant",
                   status: "passed",
                   failureMessages: [],
                   duration: 1,
@@ -325,6 +337,204 @@ describe("validateIntentAwareTests", () => {
     ]);
     expect(await readFile(sourceFile, "utf-8")).toBe(
       "export const answer = () => 42;\n",
+    );
+    expect(runCommandMock).toHaveBeenCalledTimes(2);
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      1,
+      "npm",
+      expect.arrayContaining([
+        "test/kept.jittest.test.ts",
+        "test/dropped.jittest.test.ts",
+      ]),
+      expect.objectContaining({ cwd: tempDir }),
+    );
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      2,
+      "npm",
+      expect.arrayContaining([
+        "test/kept.jittest.test.ts",
+        "test/dropped.jittest.test.ts",
+      ]),
+      expect.objectContaining({ cwd: tempDir }),
+    );
+  });
+
+  it("falls back to generated tests when mutant validation fails", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "validate-test-"));
+    tempDirs.push(tempDir);
+    const escapedName = `${path.basename(tempDir)}-escaped.ts`;
+    const escapedPath = path.resolve(tempDir, `../${escapedName}`);
+
+    const runCommandMock = vi.fn().mockResolvedValue({
+      stdout: JSON.stringify({
+        testResults: [
+          {
+            name: path.join(tempDir, "test/unsafe.jittest.test.ts"),
+            status: "passed",
+            assertionResults: [
+              {
+                ancestorTitles: ["suite"],
+                title: "passes on parent",
+                status: "passed",
+                failureMessages: [],
+                duration: 1,
+              },
+            ],
+          },
+        ],
+      }),
+      stderr: "",
+    });
+
+    vi.doMock("../../source/utils/process.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/utils/process.js")
+      >("../../source/utils/process.js");
+
+      return {
+        ...actual,
+        runCommand: runCommandMock,
+      };
+    });
+
+    const { validateIntentAwareTests } = await import(
+      "../../source/execution/runner.js"
+    );
+    const tests = [
+      makeTest("test/unsafe.jittest.test.ts", {
+        mutantValidation: {
+          targetFilePath: `../${escapedName}`,
+          mutantCode: "export const answer = () => 0;\n",
+        },
+      }),
+    ];
+
+    const validated = await validateIntentAwareTests(tests, tempDir, 1000);
+
+    expect(validated).toEqual(tests);
+    expect(runCommandMock).toHaveBeenCalledTimes(1);
+    await expect(access(escapedPath)).rejects.toThrow();
+  });
+
+  it("runs the parent validation once across different mutants", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "validate-test-"));
+    tempDirs.push(tempDir);
+
+    await mkdir(path.join(tempDir, "source"), { recursive: true });
+    await writeFile(
+      path.join(tempDir, "source/a.ts"),
+      "export const a = () => 1;\n",
+      "utf-8",
+    );
+    await writeFile(
+      path.join(tempDir, "source/b.ts"),
+      "export const b = () => 1;\n",
+      "utf-8",
+    );
+
+    const runCommandMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          testResults: [
+            {
+              name: path.join(tempDir, "test/a.jittest.test.ts"),
+              status: "passed",
+              assertionResults: [
+                {
+                  ancestorTitles: ["suite"],
+                  title: "passes on parent",
+                  status: "passed",
+                  failureMessages: [],
+                  duration: 1,
+                },
+              ],
+            },
+            {
+              name: path.join(tempDir, "test/b.jittest.test.ts"),
+              status: "passed",
+              assertionResults: [
+                {
+                  ancestorTitles: ["suite"],
+                  title: "passes on parent",
+                  status: "passed",
+                  failureMessages: [],
+                  duration: 1,
+                },
+              ],
+            },
+          ],
+        }),
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: makeVitestOutput(
+          path.join(tempDir, "test/a.jittest.test.ts"),
+          "failed",
+        ),
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: makeVitestOutput(
+          path.join(tempDir, "test/b.jittest.test.ts"),
+          "failed",
+        ),
+        stderr: "",
+      });
+
+    vi.doMock("../../source/utils/process.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/utils/process.js")
+      >("../../source/utils/process.js");
+
+      return {
+        ...actual,
+        runCommand: runCommandMock,
+      };
+    });
+
+    const { validateIntentAwareTests } = await import(
+      "../../source/execution/runner.js"
+    );
+    const tests = [
+      makeTest("test/a.jittest.test.ts", {
+        mutantValidation: {
+          targetFilePath: "source/a.ts",
+          mutantCode: "export const a = () => 0;\n",
+        },
+      }),
+      makeTest("test/b.jittest.test.ts", {
+        mutantValidation: {
+          targetFilePath: "source/b.ts",
+          mutantCode: "export const b = () => 0;\n",
+        },
+      }),
+    ];
+
+    const validated = await validateIntentAwareTests(tests, tempDir, 1000);
+
+    expect(validated).toEqual(tests);
+    expect(runCommandMock).toHaveBeenCalledTimes(3);
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      1,
+      "npm",
+      expect.arrayContaining([
+        "test/a.jittest.test.ts",
+        "test/b.jittest.test.ts",
+      ]),
+      expect.objectContaining({ cwd: tempDir }),
+    );
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      2,
+      "npm",
+      expect.arrayContaining(["test/a.jittest.test.ts"]),
+      expect.objectContaining({ cwd: tempDir }),
+    );
+    expect(runCommandMock).toHaveBeenNthCalledWith(
+      3,
+      "npm",
+      expect.arrayContaining(["test/b.jittest.test.ts"]),
+      expect.objectContaining({ cwd: tempDir }),
     );
   });
 });
