@@ -113,6 +113,62 @@ describe("evaluateRubFake", () => {
     ).toBe(true);
   });
 
+  it("lowers boolean flip confidence when boolean logic changed directly", () => {
+    const ctx = makeContext({
+      diff: {
+        ...makeContext().diff,
+        rawDiff: "-return true;\n+return false;",
+      },
+    });
+
+    const result = evaluateRubFake(ctx);
+    expect(result.score).toBe(0.35);
+    expect(result.rationale).toContain("directly changes boolean logic");
+  });
+
+  it("detects not implemented placeholders as false positives", () => {
+    const ctx = makeContext({
+      executionLog: "Error: not implemented",
+    });
+
+    const result = evaluateRubFake(ctx);
+    expect(
+      result.detectedPatterns.some(
+        (pattern) => pattern.name === "not_implemented_exception",
+      ),
+    ).toBe(true);
+    expect(result.score).toBeLessThan(0);
+  });
+
+  it("detects malformed data providers as false positives", () => {
+    const ctx = makeContext({
+      testCode: "test.each(undefined)('case', () => {})",
+      executionLog: "Invalid test cases from data provider",
+    });
+
+    const result = evaluateRubFake(ctx);
+    expect(
+      result.detectedPatterns.some(
+        (pattern) => pattern.name === "data_provider_broken",
+      ),
+    ).toBe(true);
+    expect(result.score).toBeLessThan(0);
+  });
+
+  it("detects undefined variables as false positives", () => {
+    const ctx = makeContext({
+      executionLog: "ReferenceError: missingValue is not defined",
+    });
+
+    const result = evaluateRubFake(ctx);
+    expect(
+      result.detectedPatterns.some(
+        (pattern) => pattern.name === "undefined_variable",
+      ),
+    ).toBe(true);
+    expect(result.score).toBeLessThan(0);
+  });
+
   it("detects refactor intent with behavior change as true positive", () => {
     const ctx = makeContext({
       diff: {
@@ -134,6 +190,51 @@ describe("evaluateRubFake", () => {
     expect(
       result.detectedPatterns.some((p) => p.name === "refactor_intent"),
     ).toBe(true);
+  });
+
+  it("detects dead-code removal with behavior change as true positive", () => {
+    const ctx = makeContext({
+      diff: {
+        ...makeContext().diff,
+        pr: {
+          ...makeContext().diff.pr,
+          title: "Remove unused auth branch",
+        },
+      },
+    });
+
+    const result = evaluateRubFake(ctx);
+    expect(
+      result.detectedPatterns.some((p) => p.name === "dead_code_removal"),
+    ).toBe(true);
+    expect(result.score).toBeGreaterThan(0);
+  });
+
+  it("detects RBAC-sensitive behavior changes", () => {
+    const ctx = makeContext({
+      diff: {
+        ...makeContext().diff,
+        rawDiff: "+checkPermission(role)",
+        files: [
+          {
+            path: "source/rbac.ts",
+            hunks: [],
+            existingTestFile: null,
+            changedExports: [],
+            changedFunctions: [],
+            touchesAuth: false,
+            touchesPayments: false,
+            touchesDataModel: false,
+            touchesAccessControl: true,
+          },
+        ],
+      },
+      executionLog: "expected role admin to be allowed",
+    });
+
+    const result = evaluateRubFake(ctx);
+    expect(result.detectedPatterns.some((p) => p.name === "rbac")).toBe(true);
+    expect(result.score).toBeGreaterThan(0);
   });
 
   it("returns neutral score when no patterns match", () => {
