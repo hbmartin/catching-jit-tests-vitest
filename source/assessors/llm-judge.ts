@@ -42,6 +42,7 @@ async function singleModelJudge(
   }
 }
 
+// Scores center ambiguous judge output at zero so median aggregation is neutral.
 const likelihoodValues: Record<JudgeOutput["unexpectedLikelihood"], number> = {
   high: 1.0,
   medium: 0.0,

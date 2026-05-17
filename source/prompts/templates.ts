@@ -170,6 +170,21 @@ Return ONLY the modified source code as a TypeScript code block:
 \`\`\``;
 }
 
+const MAX_DIAGNOSTIC_CHARS = 4000;
+
+function normalizeDiagnostic(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return "";
+  }
+
+  if (trimmed.length <= MAX_DIAGNOSTIC_CHARS) {
+    return trimmed;
+  }
+
+  return `${trimmed.slice(0, MAX_DIAGNOSTIC_CHARS)}\n...[truncated]`;
+}
+
 function judgeCatchPrompt(vars: {
   diff: string;
   inferredIntent: string;
@@ -181,14 +196,12 @@ function judgeCatchPrompt(vars: {
   childBehavior: string;
   changeType: string;
 }): string {
+  const executionLog = normalizeDiagnostic(vars.executionLog);
+  const stackTrace = normalizeDiagnostic(vars.stackTrace);
   const executionLogSection =
-    vars.executionLog.trim().length > 0
-      ? `\n## Execution Log\n${vars.executionLog}`
-      : "";
+    executionLog.length > 0 ? `\n## Execution Log\n${executionLog}` : "";
   const stackTraceSection =
-    vars.stackTrace.trim().length > 0
-      ? `\n## Execution Trace\n${vars.stackTrace}`
-      : "";
+    stackTrace.length > 0 ? `\n## Stack Trace\n${stackTrace}` : "";
 
   return `You are a code reviewer determining whether a test failure reveals an UNEXPECTED BUG in a code change, or whether the test failure simply reflects an INTENDED behavioral change.
 

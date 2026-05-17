@@ -260,11 +260,19 @@ const executeInWorktrees = async (input: {
       await installDependencies(worktrees.childDir);
     }
 
-    const executableTests = await validateIntentAwareTests(
-      input.allTests,
-      worktrees.parentDir,
-      input.config.testTimeout,
-    );
+    let executableTests = input.allTests;
+    try {
+      executableTests = await validateIntentAwareTests(
+        input.allTests,
+        worktrees.parentDir,
+        input.config.testTimeout,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(
+        `Intent-aware validation failed; executing generated tests without pre-validation: ${message}`,
+      );
+    }
 
     logger.info("Running dual execution...");
     const dualResults = await dualExecution(
@@ -348,7 +356,7 @@ const assessWeakCatches = async (input: {
     const assessment = await assessWeakCatch(
       weakCatch,
       input.diff,
-      weakCatch.childResult.failureMessage,
+      weakCatch.executionLog ?? weakCatch.childResult.failureMessage,
       input.llm,
       input.config,
     );

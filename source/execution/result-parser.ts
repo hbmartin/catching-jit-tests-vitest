@@ -133,20 +133,34 @@ function buildAssertionResult(
   });
 }
 
+function requireFirstAssertionResult(
+  assertionResults: readonly TestResult[],
+): TestResult {
+  const [result] = assertionResults;
+  if (!result) {
+    throw new Error("Expected at least one assertion result");
+  }
+  return result;
+}
+
 function buildFileLevelResult(file: VitestFileResult): TestResult {
+  const fileStatus = normalizeAssertionStatus(file.status);
+
   if (file.assertionResults.length === 0) {
-    const status = normalizeAssertionStatus(file.status);
     const failureMessage =
-      file.message || "Vitest failed before any assertions could run";
+      file.message ||
+      (fileStatus === "failed"
+        ? "Vitest failed before any assertions could run"
+        : "");
 
     return testResultSchema.parse({
       testFile: file.name,
       testName: file.name,
-      status,
+      status: fileStatus,
       failureMessage,
       duration: 0,
       failureAnalysis:
-        status === "failed" ? analyzeFailure(failureMessage) : null,
+        fileStatus === "failed" ? analyzeFailure(failureMessage) : null,
     });
   }
 
@@ -159,30 +173,29 @@ function buildFileLevelResult(file: VitestFileResult): TestResult {
   const firstPassed = assertionResults.find(
     (result) => result.status === "passed",
   );
-  const selectedResult = firstFailed ?? firstPassed ?? assertionResults[0];
-
-  if (!selectedResult) {
-    return testResultSchema.parse({
-      testFile: file.name,
-      testName: file.name,
-      status: "skipped",
-      failureMessage: "",
-      duration: 0,
-      failureAnalysis: null,
-    });
-  }
+  const selectedResult =
+    firstFailed ?? firstPassed ?? requireFirstAssertionResult(assertionResults);
 
   let aggregateStatus: TestResult["status"] = "skipped";
-  if (firstFailed) {
+  if (fileStatus === "failed" || firstFailed) {
     aggregateStatus = "failed";
   } else if (firstPassed) {
     aggregateStatus = "passed";
   }
+  const fileFailureMessage =
+    fileStatus === "failed" && file.message ? file.message : "";
+  const failureMessage =
+    fileFailureMessage.length > 0
+      ? [fileFailureMessage, selectedResult.failureMessage]
+          .filter((message) => message.length > 0)
+          .join("\n")
+      : selectedResult.failureMessage;
   const additionalAssertions = assertionResults.length - 1;
 
   return testResultSchema.parse({
     ...selectedResult,
     status: aggregateStatus,
+    failureMessage,
     testName:
       additionalAssertions > 0
         ? `${selectedResult.testName} (+${String(additionalAssertions)} more assertions)`
@@ -192,7 +205,7 @@ function buildFileLevelResult(file: VitestFileResult): TestResult {
       0,
     ),
     failureAnalysis:
-      aggregateStatus === "failed" ? selectedResult.failureAnalysis : null,
+      aggregateStatus === "failed" ? analyzeFailure(failureMessage) : null,
   });
 }
 

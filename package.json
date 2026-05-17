@@ -10,6 +10,7 @@
   "author": "Harold Martin <harold.martin@gmail.com>",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.79.0",
+    "picomatch": "^4.0.3",
     "zod": "^4.3.6"
   },
   "description": "For every PR/diff, you need to: generate tests against the parent branch that pass, run those same tests against the PR branch, and harvest the ones that now fail (\"weak catches\"). The hard part is everything around that — making the test generation diff-aware, and then filtering false positives so engineers don't ignore the signal.",
@@ -45,6 +46,7 @@
     "@biomejs/biome": "^2.3.15",
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^22",
+    "@types/picomatch": "^4.0.3",
     "@vitest/coverage-istanbul": "^4.0.18",
     "publint": "^0.3.17",
     "typescript": "^5.9.3",

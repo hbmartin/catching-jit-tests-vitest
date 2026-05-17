@@ -12,16 +12,28 @@ function normalizeTargetSymbol(targetSymbol: string): string {
 }
 
 function looksLikeSourceCode(source: string): boolean {
+  const fileName = "mutant.ts";
   const parsed = ts.createSourceFile(
-    "mutant.ts",
+    fileName,
     source,
     ts.ScriptTarget.Latest,
     true,
   );
-  const { parseDiagnostics } = parsed as ts.SourceFile & {
-    readonly parseDiagnostics: readonly ts.DiagnosticWithLocation[];
+  const compilerOptions: ts.CompilerOptions = {
+    noLib: true,
+    noResolve: true,
+    target: ts.ScriptTarget.Latest,
   };
-  return parseDiagnostics.length === 0 && parsed.statements.length > 0;
+  const host = ts.createCompilerHost(compilerOptions, true);
+  host.getSourceFile = (requestedFileName) =>
+    requestedFileName === fileName ? parsed : undefined;
+  host.fileExists = (requestedFileName) => requestedFileName === fileName;
+  host.readFile = (requestedFileName) =>
+    requestedFileName === fileName ? source : undefined;
+
+  const program = ts.createProgram([fileName], compilerOptions, host);
+  const diagnostics = program.getSyntacticDiagnostics(parsed);
+  return diagnostics.length === 0 && parsed.statements.length > 0;
 }
 
 async function generateRiskMutant(

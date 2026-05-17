@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
@@ -6,11 +6,33 @@ import { logger } from "../utils/logger.js";
 const maxContextFileBytes = 12_000;
 
 function truncateContext(value: string): string {
-  if (value.length <= maxContextFileBytes) {
+  if (Buffer.byteLength(value, "utf8") <= maxContextFileBytes) {
     return value;
   }
 
-  return `${value.slice(0, maxContextFileBytes)}\n...[truncated]`;
+  let bytes = 0;
+  let endIndex = 0;
+  for (const char of value) {
+    const charBytes = Buffer.byteLength(char, "utf8");
+    if (bytes + charBytes > maxContextFileBytes) {
+      break;
+    }
+    bytes += charBytes;
+    endIndex += char.length;
+  }
+
+  return `${value.slice(0, endIndex)}\n...[truncated]`;
+}
+
+function isPathInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === "" ||
+    (relative.length > 0 &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
 }
 
 async function loadIntentContext(
@@ -18,17 +40,32 @@ async function loadIntentContext(
   contextFiles: readonly string[],
 ): Promise<string> {
   const sections: string[] = [];
+  const resolvedRoot = path.resolve(repoRoot);
+  const realRoot = await realpath(resolvedRoot);
 
   for (const contextFile of contextFiles) {
-    const resolvedPath = path.resolve(repoRoot, contextFile);
-    try {
-      const content = await readFile(resolvedPath, "utf-8");
-      sections.push(`### ${contextFile}\n${truncateContext(content.trim())}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn(
-        `Failed to read intent context file ${contextFile}: ${message}`,
-      );
+    const resolvedPath = path.resolve(resolvedRoot, contextFile);
+    if (isPathInside(resolvedRoot, resolvedPath)) {
+      try {
+        const realResolvedPath = await realpath(resolvedPath);
+        if (isPathInside(realRoot, realResolvedPath)) {
+          const content = await readFile(realResolvedPath, "utf-8");
+          sections.push(
+            `### ${contextFile}\n${truncateContext(content.trim())}`,
+          );
+        } else {
+          logger.warn(
+            `Skipping out-of-repo intent context file: ${contextFile}`,
+          );
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn(
+          `Failed to read intent context file ${contextFile}: ${message}`,
+        );
+      }
+    } else {
+      logger.warn(`Skipping out-of-repo intent context file: ${contextFile}`);
     }
   }
 

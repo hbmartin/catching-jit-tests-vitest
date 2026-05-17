@@ -2,6 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import type { ChangedFile, DiffContext } from "../diff/types.js";
 
+import { truncateContext } from "./intent-context.js";
 import type { ProjectContext } from "./types.js";
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -37,7 +38,9 @@ async function readExistingTests(
   }
 
   try {
-    return await readFile(path.join(repoRoot, existingTestFile), "utf-8");
+    return truncateContext(
+      await readFile(path.join(repoRoot, existingTestFile), "utf-8"),
+    );
   } catch {
     return null;
   }

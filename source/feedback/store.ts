@@ -24,10 +24,13 @@ interface BuildAssessmentFeedbackRecordInput {
 
 function createRecordId(input: {
   readonly runId: string;
+  readonly workflow: Workflow;
   readonly weakCatch: WeakCatch;
 }): string {
   return createHash("sha256")
     .update(input.runId)
+    .update("\0")
+    .update(input.workflow)
     .update("\0")
     .update(input.weakCatch.test.testFilePath)
     .update("\0")
@@ -44,6 +47,7 @@ function buildAssessmentFeedbackRecord(
   return assessmentFeedbackRecordSchema.parse({
     id: createRecordId({
       runId: input.runId,
+      workflow: input.workflow,
       weakCatch: input.weakCatch,
     }),
     runId: input.runId,

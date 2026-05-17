@@ -153,4 +153,51 @@ describe("parseVitestJsonOutput", () => {
     expect(results[0]?.status).toBe("failed");
     expect(results[0]?.failureMessage).toContain("Unexpected token");
   });
+
+  it("does not invent failure messages for skipped files with no assertions", () => {
+    const json = JSON.stringify({
+      testResults: [
+        {
+          name: "test/skipped.test.ts",
+          status: "todo",
+          assertionResults: [],
+        },
+      ],
+    });
+
+    const results = parseVitestJsonOutput(json);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe("skipped");
+    expect(results[0]?.failureMessage).toBe("");
+    expect(results[0]?.failureAnalysis).toBeNull();
+  });
+
+  it("preserves file-level failures even when assertions are reported", () => {
+    const json = JSON.stringify({
+      testResults: [
+        {
+          name: "test/hook-failure.test.ts",
+          status: "failed",
+          message: "beforeAll failed: database unavailable",
+          assertionResults: [
+            {
+              ancestorTitles: ["suite"],
+              title: "passes before hook failure",
+              status: "passed",
+              failureMessages: [],
+              duration: 4,
+            },
+          ],
+        },
+      ],
+    });
+
+    const results = parseVitestJsonOutput(json);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]?.status).toBe("failed");
+    expect(results[0]?.failureMessage).toContain("beforeAll failed");
+    expect(results[0]?.failureAnalysis).not.toBeNull();
+  });
 });

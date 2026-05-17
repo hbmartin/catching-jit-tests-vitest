@@ -101,4 +101,23 @@ describe("judgeCatchPrompt", () => {
     expect(prompt).toContain("unexpectedLikelihood");
     expect(prompt).toContain("Execution Log");
   });
+
+  it("truncates large execution diagnostics", () => {
+    const longLog = "x".repeat(5000);
+    const prompt = judgeCatchPrompt({
+      diff: "+return x * 2;",
+      inferredIntent: "Double the value",
+      testCode: "expect(fn(5)).toBe(10);",
+      failureMessage: "Expected 10, got 5",
+      executionLog: longLog,
+      stackTrace: longLog,
+      parentBehavior: "Returns 10",
+      childBehavior: "Returns 5",
+      changeType: "return-value-changed",
+    });
+
+    expect(prompt).toContain("...[truncated]");
+    expect(prompt).toContain("## Stack Trace");
+    expect(prompt).not.toContain(longLog);
+  });
 });
