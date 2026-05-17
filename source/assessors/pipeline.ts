@@ -8,6 +8,21 @@ import { ensembleJudge } from "./llm-judge.js";
 import { evaluateRubFake } from "./rubfake.js";
 import type { AggregatedAssessment, Assessment, RuleContext } from "./types.js";
 
+function deriveInferredIntent(weakCatch: WeakCatch, diff: DiffContext): string {
+  const inferredIntent = weakCatch.test.inferredIntent?.trim();
+  if (inferredIntent && inferredIntent.length > 0) {
+    return inferredIntent;
+  }
+
+  const prIntent = [diff.pr.title.trim(), diff.pr.body.trim()]
+    .filter((value) => value.length > 0)
+    .join("\n");
+
+  return prIntent.length > 0
+    ? prIntent
+    : "No inferred diff intent was available for this change.";
+}
+
 function scoreToVerdict(score: number): AggregatedAssessment["verdict"] {
   if (score >= 0.6) {
     return "strong-catch";
@@ -81,9 +96,10 @@ async function assessWeakCatch(
       {
         testCode: weakCatch.test.code,
         failureMessage: weakCatch.childResult.failureMessage,
+        executionLog,
         stackTrace: weakCatch.childResult.failureAnalysis?.stackTrace ?? "",
         diff: diff.rawDiff,
-        inferredIntent: weakCatch.test.behaviorDescription,
+        inferredIntent: deriveInferredIntent(weakCatch, diff),
         behaviorChange: weakCatch.behaviorChange,
       },
       llm,

@@ -171,4 +171,28 @@ describe("describeBehaviorChange", () => {
     const change = describeBehaviorChange(result);
     expect(change.changeType).toBe("exception-introduced");
   });
+
+  it("keeps assertion failures on assertion-specific branches", () => {
+    const result: DualExecutionResult = {
+      ...makeDualResult("passed", "failed"),
+      childOutcome: {
+        testFile: "test/foo.test.ts",
+        testName: "foo test",
+        status: "failed",
+        failureMessage: "AssertionError: expected 1 to deeply equal 2",
+        duration: 100,
+        failureAnalysis: {
+          assertionType: "toEqual",
+          expected: "1",
+          actual: "2",
+          stackTrace: "",
+          isRuntimeError: true,
+          errorClass: "AssertionError",
+        },
+      },
+    };
+
+    const change = describeBehaviorChange(result);
+    expect(change.changeType).toBe("return-value-changed");
+  });
 });

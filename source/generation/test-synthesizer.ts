@@ -7,9 +7,60 @@ import { logger } from "../utils/logger.js";
 
 import type { GeneratedTest, TestSynthesisRequest } from "./types.js";
 
+const MAX_LCS_MATRIX_CELLS = 200_000;
+
+function shouldUseBoundedInlineDiff(
+  parentLineCount: number,
+  childLineCount: number,
+): boolean {
+  return (parentLineCount + 1) * (childLineCount + 1) > MAX_LCS_MATRIX_CELLS;
+}
+
+function computeBoundedInlineDiff(
+  parentLines: readonly string[],
+  childLines: readonly string[],
+): string {
+  let prefixLength = 0;
+  while (
+    prefixLength < parentLines.length &&
+    prefixLength < childLines.length &&
+    parentLines[prefixLength] === childLines[prefixLength]
+  ) {
+    prefixLength += 1;
+  }
+
+  let parentSuffixStart = parentLines.length;
+  let childSuffixStart = childLines.length;
+  while (
+    parentSuffixStart > prefixLength &&
+    childSuffixStart > prefixLength &&
+    parentLines[parentSuffixStart - 1] === childLines[childSuffixStart - 1]
+  ) {
+    parentSuffixStart -= 1;
+    childSuffixStart -= 1;
+  }
+
+  return [
+    ...parentLines.slice(0, prefixLength).map((line) => ` ${line}`),
+    ...parentLines
+      .slice(prefixLength, parentSuffixStart)
+      .map((line) => `-${line}`),
+    ...childLines
+      .slice(prefixLength, childSuffixStart)
+      .map((line) => `+${line}`),
+    ...parentLines.slice(parentSuffixStart).map((line) => ` ${line}`),
+  ].join("\n");
+}
+
 function computeInlineDiff(parent: string, child: string): string {
   const parentLines = parent.split("\n");
   const childLines = child.split("\n");
+
+  // Avoid O(n*m) allocations when full-file sources get large.
+  if (shouldUseBoundedInlineDiff(parentLines.length, childLines.length)) {
+    return computeBoundedInlineDiff(parentLines, childLines);
+  }
+
   const lcs: number[][] = Array.from({ length: parentLines.length + 1 }, () =>
     Array.from({ length: childLines.length + 1 }, () => 0),
   );
@@ -109,6 +160,9 @@ async function synthesizeTest(
       mutantDiff: targetBehavior.mutantDiff,
       importPath: deriveImportPath(request.targetPath),
       existingTests: request.existingTests,
+      availableImports: request.projectContext.availableImports,
+      tsConfigPath: request.projectContext.tsConfigPath,
+      packageJsonPath: request.projectContext.packageJsonPath,
     });
     behaviorDescription = targetBehavior.mutantDescription;
   } else {
@@ -118,6 +172,9 @@ async function synthesizeTest(
       mutantDiff: targetBehavior.prDiff,
       importPath: deriveImportPath(request.targetPath),
       existingTests: request.existingTests,
+      availableImports: request.projectContext.availableImports,
+      tsConfigPath: request.projectContext.tsConfigPath,
+      packageJsonPath: request.projectContext.packageJsonPath,
     });
     behaviorDescription = targetBehavior.riskDescription;
   }
@@ -182,6 +239,7 @@ export {
   computeInlineDiff,
   deriveTestFilePath,
   extractCodeBlock,
+  shouldUseBoundedInlineDiff,
   synthesizeMultipleTests,
   synthesizeTest,
 };

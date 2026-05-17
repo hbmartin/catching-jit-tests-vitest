@@ -2,6 +2,10 @@ import ts from "typescript";
 
 import type { ASTAnalysis, FunctionInfo, SignatureChange } from "./types.js";
 
+function createMatchKey(name: string, occurrence: number): string {
+  return `${name}:${String(occurrence)}`;
+}
+
 function getMethodContainerName(node: ts.MethodDeclaration): string | null {
   const { parent } = node;
   if (ts.isClassLike(parent) && parent.name) {
@@ -9,13 +13,13 @@ function getMethodContainerName(node: ts.MethodDeclaration): string | null {
   }
 
   if (ts.isObjectLiteralExpression(parent)) {
-    const variableStatement = parent.parent?.parent;
+    const variableDeclaration = parent.parent;
     if (
-      variableStatement &&
-      ts.isVariableDeclaration(variableStatement) &&
-      ts.isIdentifier(variableStatement.name)
+      variableDeclaration &&
+      ts.isVariableDeclaration(variableDeclaration) &&
+      ts.isIdentifier(variableDeclaration.name)
     ) {
-      return variableStatement.name.text;
+      return variableDeclaration.name.text;
     }
   }
 
@@ -30,28 +34,59 @@ function extractNodeSignature(
   node: ts.Node,
   sourceFile: ts.SourceFile,
 ): string {
-  const text = node.getText(sourceFile).trim();
-  const braceIndex = text.indexOf("{");
-  if (braceIndex !== -1) {
-    return text.slice(0, braceIndex).trim();
+  const body =
+    ts.isFunctionLike(node) && "body" in node ? node.body : undefined;
+  if (body) {
+    return sourceFile.text
+      .slice(node.getStart(sourceFile), body.getStart(sourceFile))
+      .trim();
   }
 
+  const text = node.getText(sourceFile).trim();
   const arrowIndex = text.indexOf("=>");
   if (arrowIndex !== -1) {
     return text.slice(0, arrowIndex + 2).trim();
   }
 
+  const braceIndex = text.indexOf("{");
+  if (braceIndex !== -1) {
+    return text.slice(0, braceIndex).trim();
+  }
+
   return text;
+}
+
+function extractVariableSignature(
+  statement: ts.VariableStatement,
+  initializer: ts.ArrowFunction | ts.FunctionExpression,
+  sourceFile: ts.SourceFile,
+): string {
+  return sourceFile.text
+    .slice(
+      statement.getStart(sourceFile),
+      initializer.body.getStart(sourceFile),
+    )
+    .trim();
 }
 
 function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
   const functions: FunctionInfo[] = [];
+  const occurrencesByName = new Map<string, number>();
+
+  function pushFunction(fn: Omit<FunctionInfo, "matchKey">): void {
+    const nextOccurrence = (occurrencesByName.get(fn.name) ?? 0) + 1;
+    occurrencesByName.set(fn.name, nextOccurrence);
+    functions.push({
+      ...fn,
+      matchKey: createMatchKey(fn.name, nextOccurrence),
+    });
+  }
 
   function visit(node: ts.Node): void {
-    if (ts.isFunctionDeclaration(node) && node.name) {
+    if (ts.isFunctionDeclaration(node) && node.name && node.body) {
       const start = sourceFile.getLineAndCharacterOfPosition(node.getStart());
       const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
-      functions.push({
+      pushFunction({
         name: node.name.text,
         body: node.getText(sourceFile),
         signature: extractNodeSignature(node, sourceFile),
@@ -60,7 +95,7 @@ function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
       });
     }
 
-    if (ts.isMethodDeclaration(node) && node.name) {
+    if (ts.isMethodDeclaration(node) && node.name && node.body) {
       const start = sourceFile.getLineAndCharacterOfPosition(node.getStart());
       const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
       const nameText = ts.isIdentifier(node.name)
@@ -70,7 +105,7 @@ function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
         nameText,
         getMethodContainerName(node),
       );
-      functions.push({
+      pushFunction({
         name: qualifiedName,
         body: node.getText(sourceFile),
         signature: extractNodeSignature(node, sourceFile),
@@ -91,10 +126,14 @@ function extractFunctions(sourceFile: ts.SourceFile): FunctionInfo[] {
             node.getStart(),
           );
           const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
-          functions.push({
+          pushFunction({
             name: decl.name.text,
             body: node.getText(sourceFile),
-            signature: extractNodeSignature(node, sourceFile),
+            signature: extractVariableSignature(
+              node,
+              decl.initializer,
+              sourceFile,
+            ),
             startLine: start.line,
             endLine: end.line,
           });
@@ -219,10 +258,10 @@ function diffFunctionSignatures(
   childFunctions: readonly FunctionInfo[],
 ): SignatureChange[] {
   const changes: SignatureChange[] = [];
-  const parentMap = new Map(parentFunctions.map((f) => [f.name, f]));
+  const parentMap = new Map(parentFunctions.map((f) => [f.matchKey, f]));
 
   for (const childFn of childFunctions) {
-    const parentFn = parentMap.get(childFn.name);
+    const parentFn = parentMap.get(childFn.matchKey);
     if (
       parentFn &&
       parentFn.body !== childFn.body &&
@@ -266,13 +305,12 @@ function analyzeFileChanges(
   const addedExports = [...childExports].filter((e) => !parentExports.has(e));
   const removedExports = [...parentExports].filter((e) => !childExports.has(e));
 
-  const parentFnNames = new Set(parentFunctions.map((f) => f.name));
+  const parentFunctionsByKey = new Map(
+    parentFunctions.map((fn) => [fn.matchKey, fn]),
+  );
   const modifiedFunctions = childFunctions.filter((cf) => {
-    if (!parentFnNames.has(cf.name)) {
-      return true;
-    }
-    const pf = parentFunctions.find((f) => f.name === cf.name);
-    return pf ? pf.body !== cf.body : true;
+    const parentFn = parentFunctionsByKey.get(cf.matchKey);
+    return parentFn ? parentFn.body !== cf.body : true;
   });
 
   return {

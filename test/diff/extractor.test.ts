@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-
 import {
   extractChangedSymbols,
   parseHunks,
+  resolveChangedFunctions,
 } from "../../source/diff/extractor.js";
+import type { FunctionInfo } from "../../source/diff/types.js";
 
 describe("parseHunks", () => {
   it("parses a simple unified diff", () => {
@@ -113,5 +114,81 @@ describe("extractChangedSymbols", () => {
 
     const symbols = extractChangedSymbols("source/file.ts", diffContent);
     expect(symbols[0]?.exportType).toBe("named");
+  });
+});
+
+describe("resolveChangedFunctions", () => {
+  it("matches duplicate function names by occurrence key", () => {
+    const modifiedFunctions: FunctionInfo[] = [
+      {
+        name: "helper",
+        matchKey: "helper:2",
+        body: 'function helper() { return "three"; }',
+        signature: "function helper()",
+        startLine: 10,
+        endLine: 12,
+      },
+    ];
+    const parentFunctions = new Map<string, FunctionInfo>([
+      [
+        "helper:1",
+        {
+          name: "helper",
+          matchKey: "helper:1",
+          body: 'function helper() { return "one"; }',
+          signature: "function helper()",
+          startLine: 2,
+          endLine: 4,
+        },
+      ],
+      [
+        "helper:2",
+        {
+          name: "helper",
+          matchKey: "helper:2",
+          body: 'function helper() { return "two"; }',
+          signature: "function helper()",
+          startLine: 10,
+          endLine: 12,
+        },
+      ],
+    ]);
+    const childFunctions = new Map<string, FunctionInfo>([
+      [
+        "helper:1",
+        {
+          name: "helper",
+          matchKey: "helper:1",
+          body: 'function helper() { return "one"; }',
+          signature: "function helper()",
+          startLine: 2,
+          endLine: 4,
+        },
+      ],
+      [
+        "helper:2",
+        {
+          name: "helper",
+          matchKey: "helper:2",
+          body: 'function helper() { return "three"; }',
+          signature: "function helper()",
+          startLine: 10,
+          endLine: 12,
+        },
+      ],
+    ]);
+
+    const changedFunctions = resolveChangedFunctions({
+      filePath: "source/file.ts",
+      modifiedFunctions,
+      parentFunctions,
+      childFunctions,
+      parentText: "parent source",
+      childText: "child source",
+      hunks: [],
+    });
+
+    expect(changedFunctions[0]?.parentSource).toContain(`return "two"`);
+    expect(changedFunctions[0]?.childSource).toContain(`return "three"`);
   });
 });

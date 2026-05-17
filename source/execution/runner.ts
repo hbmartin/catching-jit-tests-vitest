@@ -1,4 +1,4 @@
-import { mkdir, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GeneratedTest } from "../generation/types.js";
 import {
@@ -13,7 +13,7 @@ import { parseVitestJsonOutput } from "./result-parser.js";
 import type { DualExecutionResult, TestResult } from "./types.js";
 
 interface VitestRunResult {
-  readonly results: readonly TestResult[];
+  readonly results: ReadonlyMap<string, TestResult>;
   readonly executionLog: string;
 }
 
@@ -40,13 +40,90 @@ async function removeTestFile(
   }
 }
 
+interface SourceOverride {
+  readonly filePath: string;
+  readonly code: string;
+}
+
+interface SourceOverrideBackup {
+  readonly filePath: string;
+  readonly originalCode: string | null;
+}
+
+function normalizeResultPath(projectDir: string, filePath: string): string {
+  return path.normalize(
+    path.isAbsolute(filePath) ? filePath : path.resolve(projectDir, filePath),
+  );
+}
+
+async function applySourceOverride(
+  projectDir: string,
+  override: SourceOverride,
+): Promise<SourceOverrideBackup> {
+  const fullPath = path.join(projectDir, override.filePath);
+  const dir = path.dirname(fullPath);
+  await mkdir(dir, { recursive: true });
+
+  let originalCode: string | null = null;
+  try {
+    originalCode = await readFile(fullPath, "utf-8");
+  } catch {
+    originalCode = null;
+  }
+
+  await writeFile(fullPath, override.code, "utf-8");
+
+  return {
+    filePath: override.filePath,
+    originalCode,
+  };
+}
+
+async function restoreSourceOverride(
+  projectDir: string,
+  backup: SourceOverrideBackup,
+): Promise<void> {
+  const fullPath = path.join(projectDir, backup.filePath);
+
+  if (backup.originalCode === null) {
+    try {
+      await unlink(fullPath);
+    } catch {
+      // File might not exist
+    }
+    return;
+  }
+
+  await writeFile(fullPath, backup.originalCode, "utf-8");
+}
+
+function mapResultsByFile(
+  projectDir: string,
+  results: readonly TestResult[],
+): ReadonlyMap<string, TestResult> {
+  return new Map(
+    results.map((result) => [
+      normalizeResultPath(projectDir, result.testFile),
+      result,
+    ]),
+  );
+}
+
 async function runVitest(
   projectDir: string,
   testFiles: readonly GeneratedTest[],
   timeout: number,
+  sourceOverrides: readonly SourceOverride[] = [],
 ): Promise<VitestRunResult> {
+  const overrideBackups: SourceOverrideBackup[] = [];
+
   try {
     await Promise.all(testFiles.map((test) => writeTestFile(projectDir, test)));
+    for (const sourceOverride of sourceOverrides) {
+      overrideBackups.push(
+        await applySourceOverride(projectDir, sourceOverride),
+      );
+    }
 
     const result = await runCommand(
       "npx",
@@ -70,14 +147,20 @@ async function runVitest(
     );
 
     return {
-      results: parseVitestJsonOutput(result.stdout),
+      results: mapResultsByFile(
+        projectDir,
+        parseVitestJsonOutput(result.stdout),
+      ),
       executionLog: [result.stdout, result.stderr].filter(Boolean).join("\n"),
     };
   } catch (err: unknown) {
     if (err instanceof CommandError && err.stdout.length > 0) {
       try {
         return {
-          results: parseVitestJsonOutput(err.stdout),
+          results: mapResultsByFile(
+            projectDir,
+            parseVitestJsonOutput(err.stdout),
+          ),
           executionLog: [err.stdout, err.stderr].filter(Boolean).join("\n"),
         };
       } catch {
@@ -95,19 +178,27 @@ async function runVitest(
       errorLog = String(err);
     }
     return {
-      results: testFiles.map((test) =>
-        testResultSchema.parse({
-          testFile: test.testFilePath,
-          testName: test.behaviorDescription,
-          status: "failed" as const,
-          failureMessage: "Vitest execution failed",
-          duration: 0,
-          failureAnalysis: null,
-        }),
+      results: new Map(
+        testFiles.map((test) => [
+          normalizeResultPath(projectDir, test.testFilePath),
+          testResultSchema.parse({
+            testFile: test.testFilePath,
+            testName: test.behaviorDescription,
+            status: "failed" as const,
+            failureMessage: "Vitest execution failed",
+            duration: 0,
+            failureAnalysis: null,
+          }),
+        ]),
       ),
       executionLog: errorLog,
     };
   } finally {
+    await Promise.all(
+      overrideBackups.map((backup) =>
+        restoreSourceOverride(projectDir, backup),
+      ),
+    );
     await Promise.all(
       testFiles.map((test) => removeTestFile(projectDir, test)),
     );
@@ -123,6 +214,53 @@ function buildDefaultOutcome(test: GeneratedTest): TestResult {
     duration: 0,
     failureAnalysis: null,
   });
+}
+
+async function validateIntentAwareTests(
+  tests: readonly GeneratedTest[],
+  parentDir: string,
+  timeout: number,
+): Promise<GeneratedTest[]> {
+  const validatedTests: GeneratedTest[] = [];
+
+  for (const test of tests) {
+    const shouldValidate =
+      test.workflow === "intent-aware" && Boolean(test.mutantValidation);
+
+    if (shouldValidate && test.mutantValidation) {
+      const resultKey = normalizeResultPath(parentDir, test.testFilePath);
+      const parentRun = await runVitest(parentDir, [test], timeout);
+      const parentOutcome =
+        parentRun.results.get(resultKey) ?? buildDefaultOutcome(test);
+
+      if (parentOutcome.status === "passed") {
+        const mutantRun = await runVitest(parentDir, [test], timeout, [
+          {
+            filePath: test.mutantValidation.targetFilePath,
+            code: test.mutantValidation.mutantCode,
+          },
+        ]);
+        const mutantOutcome =
+          mutantRun.results.get(resultKey) ?? buildDefaultOutcome(test);
+
+        if (mutantOutcome.status === "failed") {
+          validatedTests.push(test);
+        } else {
+          logger.info(
+            `Discarding ${test.testFilePath}: generated test does not kill inferred mutant`,
+          );
+        }
+      } else {
+        logger.info(
+          `Discarding ${test.testFilePath}: generated test does not pass on parent`,
+        );
+      }
+    } else {
+      validatedTests.push(test);
+    }
+  }
+
+  return validatedTests;
 }
 
 async function dualExecution(
@@ -145,13 +283,17 @@ async function dualExecution(
 
     const batchResults = batch
       .filter((test): test is GeneratedTest => Boolean(test))
-      .map((currentTest, i) =>
+      .map((currentTest) =>
         dualExecutionResultSchema.parse({
           test: currentTest,
           parentOutcome:
-            parentResults.results[i] ?? buildDefaultOutcome(currentTest),
+            parentResults.results.get(
+              normalizeResultPath(parentDir, currentTest.testFilePath),
+            ) ?? buildDefaultOutcome(currentTest),
           childOutcome:
-            childResults.results[i] ?? buildDefaultOutcome(currentTest),
+            childResults.results.get(
+              normalizeResultPath(childDir, currentTest.testFilePath),
+            ) ?? buildDefaultOutcome(currentTest),
           parentExecutionLog: parentResults.executionLog,
           childExecutionLog: childResults.executionLog,
         }),
@@ -163,4 +305,4 @@ async function dualExecution(
   return results;
 }
 
-export { dualExecution, runVitest };
+export { dualExecution, runVitest, validateIntentAwareTests };

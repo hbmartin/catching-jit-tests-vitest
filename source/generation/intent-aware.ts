@@ -6,6 +6,7 @@ import { inferRisksResponseSchema } from "../runtime-schemas.js";
 import type { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
+import { resolveProjectContext } from "./context.js";
 import { generateRiskMutant } from "./mutant-generator.js";
 import {
   computeInlineDiff,
@@ -16,7 +17,10 @@ import type { GeneratedTest, InferredRisk } from "./types.js";
 async function inferDiffRisks(
   diff: DiffContext,
   llm: LLMClient,
-): Promise<readonly InferredRisk[]> {
+): Promise<{
+  intent: string;
+  risks: readonly InferredRisk[];
+}> {
   const prompt = inferRisksPrompt({
     prTitle: diff.pr.title,
     prBody: diff.pr.body,
@@ -36,11 +40,17 @@ async function inferDiffRisks(
     logger.info(
       `Inferred ${String(response.risks.length)} risks: ${response.intent}`,
     );
-    return response.risks;
+    return {
+      intent: response.intent,
+      risks: response.risks,
+    };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`Risk inference failed: ${message}`);
-    return [];
+    return {
+      intent: "",
+      risks: [],
+    };
   }
 }
 
@@ -62,6 +72,7 @@ function matchesRiskTarget(
 
 async function generateTestsForRisk(
   risk: InferredRisk,
+  inferredIntent: string,
   diff: DiffContext,
   repoRoot: string,
   llm: LLMClient,
@@ -119,6 +130,11 @@ async function generateTestsForRisk(
   }
 
   logger.info(`Generating tests for risk: ${risk.description}`);
+  const { existingTests, projectContext } = await resolveProjectContext(
+    repoRoot,
+    diff,
+    targetFile,
+  );
 
   const candidates = await synthesizeMultipleTests(
     {
@@ -128,17 +144,13 @@ async function generateTestsForRisk(
         parentSource,
       targetPath: targetFile.path,
       fullFileSource: mutant.mutantCode,
-      existingTests: null,
+      existingTests,
       targetBehavior: {
         kind: "mutant",
         mutantDiff: computeInlineDiff(parentSource, mutant.mutantCode),
         mutantDescription: `[Risk: ${risk.description}]`,
       },
-      projectContext: {
-        availableImports: [],
-        tsConfigPath: null,
-        packageJsonPath: null,
-      },
+      projectContext,
       targetSymbol: risk.targetSymbol,
       workflow: "intent-aware",
       candidateKey: `${targetFile.path}:${risk.targetSymbol}:${risk.id}`,
@@ -151,6 +163,11 @@ async function generateTestsForRisk(
     ...candidate,
     workflow: "intent-aware" as const,
     behaviorDescription: `[Risk: ${risk.description}] ${candidate.behaviorDescription}`,
+    inferredIntent,
+    mutantValidation: {
+      targetFilePath: targetFile.path,
+      mutantCode: mutant.mutantCode,
+    },
   }));
 }
 
@@ -160,7 +177,7 @@ async function intentAwareWorkflow(
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<GeneratedTest[]> {
-  const risks = await inferDiffRisks(diff, llm);
+  const { intent, risks } = await inferDiffRisks(diff, llm);
 
   if (risks.length === 0) {
     logger.info("No risks inferred, skipping intent-aware workflow");
@@ -168,7 +185,7 @@ async function intentAwareWorkflow(
   }
 
   const riskTestPromises = risks.map((risk) =>
-    generateTestsForRisk(risk, diff, repoRoot, llm, config),
+    generateTestsForRisk(risk, intent, diff, repoRoot, llm, config),
   );
   const riskTestResults = await Promise.all(riskTestPromises);
   const tests = riskTestResults.flat();

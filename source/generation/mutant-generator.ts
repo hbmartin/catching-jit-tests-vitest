@@ -18,7 +18,10 @@ function looksLikeSourceCode(source: string): boolean {
     ts.ScriptTarget.Latest,
     true,
   );
-  return parsed.statements.length > 0;
+  const { parseDiagnostics } = parsed as ts.SourceFile & {
+    readonly parseDiagnostics: readonly ts.DiagnosticWithLocation[];
+  };
+  return parseDiagnostics.length === 0 && parsed.statements.length > 0;
 }
 
 async function generateRiskMutant(
@@ -68,4 +71,4 @@ async function generateRiskMutant(
   }
 }
 
-export { generateRiskMutant };
+export { generateRiskMutant, looksLikeSourceCode };

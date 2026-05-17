@@ -34,6 +34,7 @@ interface RubFakeRule {
 interface JudgeInput {
   readonly testCode: string;
   readonly failureMessage: string;
+  readonly executionLog: string;
   readonly stackTrace: string;
   readonly diff: string;
   readonly inferredIntent: string;
@@ -41,8 +42,7 @@ interface JudgeInput {
 }
 
 interface JudgeOutput {
-  readonly isUnexpectedBug: boolean;
-  readonly confidence: "high" | "medium" | "low";
+  readonly unexpectedLikelihood: "high" | "medium" | "low";
   readonly explanation: string;
 }
 

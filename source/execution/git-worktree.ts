@@ -29,6 +29,24 @@ async function execInDir(
   return result.stdout.trim();
 }
 
+async function removeWorktree(
+  repoRoot: string,
+  worktreeDir: string,
+  warningMessage: string,
+): Promise<void> {
+  try {
+    await execInDir(
+      "git",
+      ["worktree", "remove", worktreeDir, "--force"],
+      repoRoot,
+    );
+  } catch {
+    if (await pathExists(worktreeDir)) {
+      logger.warn(warningMessage);
+    }
+  }
+}
+
 async function setupWorktrees(
   repoRoot: string,
   baseSha: string,
@@ -41,36 +59,23 @@ async function setupWorktrees(
   logger.info(`Setting up worktrees in ${workDir}`);
 
   let parentCreated = false;
-  let childCreated = false;
 
   try {
     await execInDir("git", ["worktree", "add", parentDir, baseSha], repoRoot);
     parentCreated = true;
     await execInDir("git", ["worktree", "add", childDir, headSha], repoRoot);
-    childCreated = true;
   } catch (error) {
-    if (childCreated) {
-      try {
-        await execInDir(
-          "git",
-          ["worktree", "remove", childDir, "--force"],
-          repoRoot,
-        );
-      } catch {
-        logger.warn("Failed to remove child worktree after setup error");
-      }
-    }
-
     if (parentCreated) {
-      try {
-        await execInDir(
-          "git",
-          ["worktree", "remove", parentDir, "--force"],
-          repoRoot,
-        );
-      } catch {
-        logger.warn("Failed to remove parent worktree after setup error");
-      }
+      await removeWorktree(
+        repoRoot,
+        childDir,
+        "Failed to remove child worktree after setup error",
+      );
+      await removeWorktree(
+        repoRoot,
+        parentDir,
+        "Failed to remove parent worktree after setup error",
+      );
     }
 
     try {
@@ -89,24 +94,16 @@ async function setupWorktrees(
     childDir,
     cleanup: async () => {
       logger.info("Cleaning up worktrees");
-      try {
-        await execInDir(
-          "git",
-          ["worktree", "remove", parentDir, "--force"],
-          repoRoot,
-        );
-      } catch {
-        logger.warn("Failed to remove parent worktree");
-      }
-      try {
-        await execInDir(
-          "git",
-          ["worktree", "remove", childDir, "--force"],
-          repoRoot,
-        );
-      } catch {
-        logger.warn("Failed to remove child worktree");
-      }
+      await removeWorktree(
+        repoRoot,
+        parentDir,
+        "Failed to remove parent worktree",
+      );
+      await removeWorktree(
+        repoRoot,
+        childDir,
+        "Failed to remove child worktree",
+      );
       try {
         await rm(workDir, { recursive: true, force: true });
       } catch {

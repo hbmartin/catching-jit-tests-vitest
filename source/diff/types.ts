@@ -69,6 +69,7 @@ interface SignatureChange {
 
 interface FunctionInfo {
   readonly name: string;
+  readonly matchKey: string;
   readonly body: string;
   readonly signature: string;
   readonly startLine: number;

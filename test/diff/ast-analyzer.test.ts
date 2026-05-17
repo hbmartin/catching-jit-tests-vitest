@@ -55,6 +55,53 @@ function goodbye() { return "bye"; }`;
     expect(functions[0]?.name).toBe("UserService.findById");
   });
 
+  it("qualifies object literal method names", () => {
+    const source = `const handlers = {
+  format(value: string) {
+    return value.trim();
+  },
+};`;
+    const sf = ts.createSourceFile(
+      "test.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const functions = extractFunctions(sf);
+
+    expect(functions[0]?.name).toBe("handlers.format");
+  });
+
+  it("preserves signatures with object patterns and object return types", () => {
+    const source = `function configure(
+  { enabled }: { enabled: boolean },
+): { enabled: boolean } {
+  return { enabled };
+}
+
+const render = (
+  { message }: { message: string },
+): { message: string } => ({ message });`;
+    const sf = ts.createSourceFile(
+      "test.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+    const functions = extractFunctions(sf);
+
+    expect(functions[0]?.signature).toBe(
+      `function configure(
+  { enabled }: { enabled: boolean },
+): { enabled: boolean }`,
+    );
+    expect(functions[1]?.signature).toBe(
+      `const render = (
+  { message }: { message: string },
+): { message: string } =>`,
+    );
+  });
+
   it("returns empty for files without functions", () => {
     const source = `const x = 42;
 type Foo = string;`;
@@ -138,5 +185,46 @@ export function bar() {}`;
 
     const analysis = analyzeFileChanges(parent, child, "file.ts");
     expect(analysis.errorHandlingChanged).toBe(true);
+  });
+
+  it("tracks duplicate nested function names by occurrence order", () => {
+    const parent = `function first() {
+  function helper() {
+    return "one";
+  }
+
+  return helper();
+}
+
+function second() {
+  function helper() {
+    return "two";
+  }
+
+  return helper();
+}`;
+    const child = `function first() {
+  function helper() {
+    return "one";
+  }
+
+  return helper();
+}
+
+function second() {
+  function helper() {
+    return "three";
+  }
+
+  return helper();
+}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+    const helperChanges = analysis.modifiedFunctions.filter(
+      (fn) => fn.name === "helper",
+    );
+
+    expect(helperChanges).toHaveLength(1);
+    expect(helperChanges[0]?.body).toContain(`return "three"`);
   });
 });

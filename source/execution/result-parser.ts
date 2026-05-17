@@ -1,5 +1,6 @@
 import {
   testResultSchema,
+  type VitestFileResult,
   vitestJsonOutputSchema,
 } from "../runtime-schemas.js";
 import type {
@@ -114,25 +115,91 @@ function normalizeAssertionStatus(
   }
 }
 
+function buildAssertionResult(
+  file: VitestFileResult,
+  assertion: VitestAssertionResult,
+): TestResult {
+  const status = normalizeAssertionStatus(assertion.status);
+  const failureMessage = assertion.failureMessages.join("\n");
+
+  return testResultSchema.parse({
+    testFile: file.name,
+    testName: [...assertion.ancestorTitles, assertion.title].join(" > "),
+    status,
+    failureMessage,
+    duration: assertion.duration,
+    failureAnalysis:
+      status === "failed" ? analyzeFailure(failureMessage) : null,
+  });
+}
+
+function buildFileLevelResult(file: VitestFileResult): TestResult {
+  if (file.assertionResults.length === 0) {
+    const status = normalizeAssertionStatus(file.status);
+    const failureMessage =
+      file.message || "Vitest failed before any assertions could run";
+
+    return testResultSchema.parse({
+      testFile: file.name,
+      testName: file.name,
+      status,
+      failureMessage,
+      duration: 0,
+      failureAnalysis:
+        status === "failed" ? analyzeFailure(failureMessage) : null,
+    });
+  }
+
+  const assertionResults = file.assertionResults.map((assertion) =>
+    buildAssertionResult(file, assertion),
+  );
+  const firstFailed = assertionResults.find(
+    (result) => result.status === "failed",
+  );
+  const firstPassed = assertionResults.find(
+    (result) => result.status === "passed",
+  );
+  const selectedResult = firstFailed ?? firstPassed ?? assertionResults[0];
+
+  if (!selectedResult) {
+    return testResultSchema.parse({
+      testFile: file.name,
+      testName: file.name,
+      status: "skipped",
+      failureMessage: "",
+      duration: 0,
+      failureAnalysis: null,
+    });
+  }
+
+  let aggregateStatus: TestResult["status"] = "skipped";
+  if (firstFailed) {
+    aggregateStatus = "failed";
+  } else if (firstPassed) {
+    aggregateStatus = "passed";
+  }
+  const additionalAssertions = assertionResults.length - 1;
+
+  return testResultSchema.parse({
+    ...selectedResult,
+    status: aggregateStatus,
+    testName:
+      additionalAssertions > 0
+        ? `${selectedResult.testName} (+${String(additionalAssertions)} more assertions)`
+        : selectedResult.testName,
+    duration: assertionResults.reduce(
+      (sum, result) => sum + result.duration,
+      0,
+    ),
+    failureAnalysis:
+      aggregateStatus === "failed" ? selectedResult.failureAnalysis : null,
+  });
+}
+
 function parseVitestJsonOutput(stdout: string): TestResult[] {
   const json = vitestJsonOutputSchema.parse(JSON.parse(stdout));
 
-  return json.testResults.flatMap((file) =>
-    file.assertionResults.map((assertion) => {
-      const status = normalizeAssertionStatus(assertion.status);
-      const failureMessage = assertion.failureMessages.join("\n");
-
-      return testResultSchema.parse({
-        testFile: file.name,
-        testName: [...assertion.ancestorTitles, assertion.title].join(" > "),
-        status,
-        failureMessage,
-        duration: assertion.duration,
-        failureAnalysis:
-          status === "failed" ? analyzeFailure(failureMessage) : null,
-      });
-    }),
-  );
+  return json.testResults.map((file) => buildFileLevelResult(file));
 }
 
 export { analyzeFailure, parseVitestJsonOutput };

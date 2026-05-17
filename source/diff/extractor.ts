@@ -11,6 +11,7 @@ import type {
   ChangedSymbol,
   DiffContext,
   DiffHunk,
+  FunctionInfo,
 } from "./types.js";
 
 const hunkHeaderRegex = /^@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@/;
@@ -217,35 +218,21 @@ async function buildChangedFunctions(
   const parentText = parentSource ?? "";
   const childText = childSource;
   const analysis = analyzeFileChanges(parentText, childText, filePath);
-  const parentFunctions = new Map(
-    extractFunctions(analyzeSourceFile(filePath, parentText)).map((fn) => [
-      fn.name,
-      fn,
-    ]),
+  const parentFunctions = indexFunctionsByMatchKey(
+    extractFunctions(analyzeSourceFile(filePath, parentText)),
   );
-  const childFunctions = new Map(
-    extractFunctions(analyzeSourceFile(filePath, childText)).map((fn) => [
-      fn.name,
-      fn,
-    ]),
+  const childFunctions = indexFunctionsByMatchKey(
+    extractFunctions(analyzeSourceFile(filePath, childText)),
   );
 
-  return analysis.modifiedFunctions.map((fn) => {
-    const parentMatch = parentFunctions.get(fn.name);
-    const childMatch = childFunctions.get(fn.name) ?? fn;
-
-    return {
-      name: fn.name,
-      filePath,
-      parentSource: parentMatch?.body ?? "",
-      childSource: childMatch.body,
-      parentFileSource: parentText,
-      childFileSource: childText,
-      hunks: [...hunks],
-      signature: childMatch.signature,
-      requiredImports: [],
-      hasCoverage: false,
-    };
+  return resolveChangedFunctions({
+    filePath,
+    modifiedFunctions: analysis.modifiedFunctions,
+    parentFunctions,
+    childFunctions,
+    parentText,
+    childText,
+    hunks,
   });
 }
 
@@ -256,6 +243,40 @@ function analyzeSourceFile(filePath: string, sourceText: string) {
     ts.ScriptTarget.Latest,
     true,
   );
+}
+
+function indexFunctionsByMatchKey(
+  functions: readonly FunctionInfo[],
+): Map<string, FunctionInfo> {
+  return new Map(functions.map((fn) => [fn.matchKey, fn]));
+}
+
+function resolveChangedFunctions(input: {
+  filePath: string;
+  modifiedFunctions: readonly FunctionInfo[];
+  parentFunctions: ReadonlyMap<string, FunctionInfo>;
+  childFunctions: ReadonlyMap<string, FunctionInfo>;
+  parentText: string;
+  childText: string;
+  hunks: readonly DiffHunk[];
+}): ChangedFunction[] {
+  return input.modifiedFunctions.map((fn) => {
+    const parentMatch = input.parentFunctions.get(fn.matchKey);
+    const childMatch = input.childFunctions.get(fn.matchKey) ?? fn;
+
+    return {
+      name: fn.name,
+      filePath: input.filePath,
+      parentSource: parentMatch?.body ?? "",
+      childSource: childMatch.body,
+      parentFileSource: input.parentText,
+      childFileSource: input.childText,
+      hunks: [...input.hunks],
+      signature: childMatch.signature,
+      requiredImports: [],
+      hasCoverage: false,
+    };
+  });
 }
 
 function extractChangedSymbols(
@@ -386,4 +407,5 @@ export {
   getFileAtCommit,
   getFileDiff,
   parseHunks,
+  resolveChangedFunctions,
 };
