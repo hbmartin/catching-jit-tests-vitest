@@ -202,6 +202,51 @@ export const assessmentBundleSchema = z.object({
 
 export type AssessmentBundle = z.infer<typeof assessmentBundleSchema>;
 
+export const engineerFeedbackSchema = z.object({
+  label: z
+    .enum([
+      "unknown",
+      "confirmed-true-positive",
+      "confirmed-false-positive",
+      "intended-change",
+    ])
+    .default("unknown"),
+  dismissedAt: z.string().nullable().default(null),
+  dismissalSeconds: z.number().nonnegative().nullable().default(null),
+  notes: z.string().nullable().default(null),
+});
+
+export type EngineerFeedback = z.infer<typeof engineerFeedbackSchema>;
+
+export const assessmentFeedbackRecordSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  recordedAt: z.string(),
+  baseRef: z.string(),
+  headRef: z.string(),
+  workflow: workflowSchema,
+  riskScore: z.number().min(0).max(1),
+  pr: z.object({
+    title: z.string(),
+    body: z.string(),
+    branch: z.string(),
+    baseSha: z.string(),
+    headSha: z.string(),
+  }),
+  weakCatch: weakCatchSchema,
+  assessment: aggregatedAssessmentSchema,
+  engineerFeedback: engineerFeedbackSchema.default({
+    label: "unknown",
+    dismissedAt: null,
+    dismissalSeconds: null,
+    notes: null,
+  }),
+});
+
+export type AssessmentFeedbackRecord = z.infer<
+  typeof assessmentFeedbackRecordSchema
+>;
+
 export const behaviorReportDetailsSchema = z.object({
   behaviorChange: behaviorChangeSchema,
   verdict: aggregatedAssessmentSchema.shape.verdict,

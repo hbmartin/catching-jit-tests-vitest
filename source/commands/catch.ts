@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import path from "node:path";
+
 import { assessWeakCatch } from "../assessors/pipeline.js";
 import type { CatchCommandOptions } from "../config.js";
 import { loadConfig } from "../config.js";
@@ -12,6 +15,10 @@ import {
   dualExecution,
   validateIntentAwareTests,
 } from "../execution/runner.js";
+import {
+  appendAssessmentFeedbackRecord,
+  buildAssessmentFeedbackRecord,
+} from "../feedback/store.js";
 import { dodgyDiffWorkflow } from "../generation/dodgy-diff.js";
 import { intentAwareWorkflow } from "../generation/intent-aware.js";
 import type { GeneratedTest } from "../generation/types.js";
@@ -38,7 +45,6 @@ interface CatchCommandResult {
 }
 
 const writeStdout = (value: string): void => {
-  // biome-ignore lint/correctness/noProcessGlobal: CLI output is written in a Node runtime.
   process.stdout.write(`${value}\n`);
 };
 
@@ -50,6 +56,7 @@ const createCommandConfig = (options: CatchCommandOptions) =>
     testTimeout: options.timeout,
     outputFormat: options.output,
     reportThreshold: options.reportThreshold,
+    feedbackPath: options.feedbackPath,
   });
 
 const createResult = (
@@ -237,11 +244,47 @@ const executeInWorktrees = async (input: {
   }
 };
 
+const recordAssessmentFeedback = async (input: {
+  options: CatchCommandOptions;
+  config: ReturnType<typeof createCommandConfig>;
+  runId: string;
+  recordedAt: string;
+  diff: DiffContext;
+  weakCatch: ReturnType<typeof harvestWeakCatches>[number];
+  assessment: Awaited<ReturnType<typeof assessWeakCatch>>;
+}): Promise<void> => {
+  const feedbackPath = path.resolve(
+    input.options.cwd,
+    input.config.feedbackPath,
+  );
+
+  try {
+    await appendAssessmentFeedbackRecord(
+      feedbackPath,
+      buildAssessmentFeedbackRecord({
+        runId: input.runId,
+        recordedAt: input.recordedAt,
+        baseRef: input.options.base,
+        headRef: input.options.head,
+        workflow: input.config.workflow,
+        diff: input.diff,
+        weakCatch: input.weakCatch,
+        assessment: input.assessment,
+      }),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`Failed to record assessment feedback: ${message}`);
+  }
+};
+
 const assessWeakCatches = async (input: {
+  options: CatchCommandOptions;
   weakCatches: ReturnType<typeof harvestWeakCatches>;
   diff: DiffContext;
   llm: LLMClient;
   config: ReturnType<typeof createCommandConfig>;
+  runId: string;
 }): Promise<{
   reports: readonly BehaviorReport[];
   assessMs: number;
@@ -250,6 +293,7 @@ const assessWeakCatches = async (input: {
   const reports: BehaviorReport[] = [];
 
   for (const weakCatch of input.weakCatches) {
+    const recordedAt = new Date().toISOString();
     const assessment = await assessWeakCatch(
       weakCatch,
       input.diff,
@@ -257,6 +301,15 @@ const assessWeakCatches = async (input: {
       input.llm,
       input.config,
     );
+    await recordAssessmentFeedback({
+      options: input.options,
+      config: input.config,
+      runId: input.runId,
+      recordedAt,
+      diff: input.diff,
+      weakCatch,
+      assessment,
+    });
 
     if (assessment.shouldReport) {
       reports.push(generateBehaviorReport(assessment, weakCatch));
@@ -278,6 +331,7 @@ const executeCatchWorkflow = async (input: {
   diffMs: number;
   genMs: number;
   startTime: number;
+  runId: string;
 }): Promise<{
   reports: readonly BehaviorReport[];
   stats: RunStats;
@@ -288,10 +342,12 @@ const executeCatchWorkflow = async (input: {
     allTests: input.allTests,
   });
   const assessed = await assessWeakCatches({
+    options: input.options,
     weakCatches: executed.weakCatches,
     diff: input.diff,
     llm: input.llm,
     config: input.config,
+    runId: input.runId,
   });
 
   return {
@@ -348,6 +404,7 @@ export const createCatchCommandResult = async (
   options: CatchCommandOptions,
 ): Promise<CatchCommandResult> => {
   const startTime = Date.now();
+  const runId = randomUUID();
   const config = createCommandConfig(options);
   const llm = new LLMClient(config.llm);
   const { diff, diffMs } = await loadDiffWithRisk(options);
@@ -376,6 +433,7 @@ export const createCatchCommandResult = async (
     diffMs,
     genMs,
     startTime,
+    runId,
   });
 
   return createResult(

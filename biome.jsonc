@@ -7,12 +7,7 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": [
-      "**",
-      "!dist",
-      "!coverage",
-      "!.cache"
-    ]
+    "includes": ["**", "!dist", "!coverage", "!.cache"]
   },
   "formatter": {
     "enabled": true,
@@ -393,8 +388,10 @@
     {
       "includes": [
         "source/config.ts",
+        "source/commands/**",
         "source/diff/**",
         "source/execution/**",
+        "source/feedback/**",
         "source/generation/**",
         "source/harvest/**",
         "source/assessors/**",
