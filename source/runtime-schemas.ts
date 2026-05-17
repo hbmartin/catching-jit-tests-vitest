@@ -174,6 +174,13 @@ export const assessmentSchema = z.object({
 
 export type Assessment = z.infer<typeof assessmentSchema>;
 
+export const judgeOutputSchema = z.object({
+  unexpectedLikelihood: z.enum(["high", "medium", "low"]),
+  explanation: z.string(),
+});
+
+export type JudgeOutput = z.infer<typeof judgeOutputSchema>;
+
 export const aggregatedAssessmentSchema = z.object({
   assessments: z.array(assessmentSchema),
   combinedScore: z.number().min(-1).max(1),

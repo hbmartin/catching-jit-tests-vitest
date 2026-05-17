@@ -79,6 +79,7 @@ export {
   generatedTestSchema,
   inferRisksResponseSchema,
   inferredRiskSchema,
+  judgeOutputSchema,
   reportCommandResultSchema,
   runStatsSchema,
   testResultSchema,

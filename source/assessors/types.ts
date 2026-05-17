@@ -4,6 +4,7 @@ import type {
   AggregatedAssessment as RuntimeAggregatedAssessment,
   Assessment as RuntimeAssessment,
   DetectedPattern as RuntimeDetectedPattern,
+  JudgeOutput as RuntimeJudgeOutput,
 } from "../runtime-schemas.js";
 
 type AssessmentScore = number;
@@ -41,10 +42,7 @@ interface JudgeInput {
   readonly behaviorChange: BehaviorChange;
 }
 
-interface JudgeOutput {
-  readonly unexpectedLikelihood: "high" | "medium" | "low";
-  readonly explanation: string;
-}
+type JudgeOutput = RuntimeJudgeOutput;
 
 interface AssessmentRecord {
   readonly weakCatch: WeakCatch;
