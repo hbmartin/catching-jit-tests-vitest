@@ -22,7 +22,11 @@ import {
 import { dodgyDiffWorkflow } from "../generation/dodgy-diff.js";
 import { intentAwareWorkflow } from "../generation/intent-aware.js";
 import type { GeneratedTest } from "../generation/types.js";
-import { harvestWeakCatches } from "../harvest/harvester.js";
+import {
+  harvestHardeningCandidates,
+  harvestWeakCatches,
+} from "../harvest/harvester.js";
+import type { HardeningCandidate } from "../harvest/types.js";
 import { generateBehaviorReport } from "../reporting/behavior-change.js";
 import { formatCatchResult } from "../reporting/console.js";
 import { formatPRComment } from "../reporting/github-comment.js";
@@ -40,6 +44,7 @@ interface CatchCommandResult {
   diff: DiffContext;
   eligibleForGeneration: boolean;
   reports: readonly BehaviorReport[];
+  hardeningCandidates: readonly HardeningCandidate[];
   stats: RunStats | null;
   statusMessage?: string;
 }
@@ -66,6 +71,7 @@ const createResult = (
   diff: DiffContext,
   eligibleForGeneration: boolean,
   reports: readonly BehaviorReport[],
+  hardeningCandidates: readonly HardeningCandidate[],
   stats: RunStats | null,
   statusMessage?: string,
 ): CatchCommandResult => ({
@@ -76,6 +82,7 @@ const createResult = (
   diff,
   eligibleForGeneration,
   reports,
+  hardeningCandidates,
   stats,
   statusMessage,
 });
@@ -139,6 +146,7 @@ const buildRunStats = (input: {
   allTests: readonly GeneratedTest[];
   dualResults: Awaited<ReturnType<typeof dualExecution>>;
   weakCatches: ReturnType<typeof harvestWeakCatches>;
+  hardeningCandidates: ReturnType<typeof harvestHardeningCandidates>;
   reports: readonly BehaviorReport[];
   llmStats: ReturnType<LLMClient["getStats"]>;
 }): RunStats =>
@@ -161,6 +169,7 @@ const buildRunStats = (input: {
       (result) => result.childOutcome.status === "failed",
     ).length,
     weakCatchCount: input.weakCatches.length,
+    hardeningCandidateCount: input.hardeningCandidates.length,
     assessedAsTP: input.reports.length,
     assessedAsFP: input.weakCatches.length - input.reports.length,
     assessedAsUncertain: 0,
@@ -173,6 +182,9 @@ const buildRunStats = (input: {
         weakCatches: input.weakCatches.filter(
           (weakCatch) => weakCatch.test.workflow === "dodgy-diff",
         ).length,
+        hardeningCandidates: input.hardeningCandidates.filter(
+          (candidate) => candidate.test.workflow === "dodgy-diff",
+        ).length,
       },
       intentAware: {
         generated: input.allTests.filter(
@@ -180,6 +192,9 @@ const buildRunStats = (input: {
         ).length,
         weakCatches: input.weakCatches.filter(
           (weakCatch) => weakCatch.test.workflow === "intent-aware",
+        ).length,
+        hardeningCandidates: input.hardeningCandidates.filter(
+          (candidate) => candidate.test.workflow === "intent-aware",
         ).length,
       },
     },
@@ -197,6 +212,7 @@ const executeInWorktrees = async (input: {
 }): Promise<{
   dualResults: Awaited<ReturnType<typeof dualExecution>>;
   weakCatches: ReturnType<typeof harvestWeakCatches>;
+  hardeningCandidates: ReturnType<typeof harvestHardeningCandidates>;
   execMs: number;
 }> => {
   logger.info(
@@ -232,11 +248,16 @@ const executeInWorktrees = async (input: {
 
     logger.info("Harvesting weak catches...");
     const weakCatches = harvestWeakCatches(dualResults);
+    const hardeningCandidates = harvestHardeningCandidates(dualResults);
     logger.info(`Found ${String(weakCatches.length)} weak catches`);
+    logger.info(
+      `Found ${String(hardeningCandidates.length)} hardening candidates`,
+    );
 
     return {
       dualResults,
       weakCatches,
+      hardeningCandidates,
       execMs: Date.now() - execStart,
     };
   } finally {
@@ -334,6 +355,7 @@ const executeCatchWorkflow = async (input: {
   runId: string;
 }): Promise<{
   reports: readonly BehaviorReport[];
+  hardeningCandidates: readonly HardeningCandidate[];
   stats: RunStats;
 }> => {
   const executed = await executeInWorktrees({
@@ -352,6 +374,7 @@ const executeCatchWorkflow = async (input: {
 
   return {
     reports: assessed.reports,
+    hardeningCandidates: executed.hardeningCandidates,
     stats: buildRunStats({
       diff: input.diff,
       diffMs: input.diffMs,
@@ -362,6 +385,7 @@ const executeCatchWorkflow = async (input: {
       allTests: input.allTests,
       dualResults: executed.dualResults,
       weakCatches: executed.weakCatches,
+      hardeningCandidates: executed.hardeningCandidates,
       reports: assessed.reports,
       llmStats: input.llm.getStats(),
     }),
@@ -380,6 +404,7 @@ const createSkippedResult = (
     diff,
     false,
     [],
+    [],
     null,
     "Skipped because the risk score is below the threshold.",
   );
@@ -395,6 +420,7 @@ const createNoTestsResult = (
     config.riskThreshold,
     diff,
     true,
+    [],
     [],
     null,
     "No tests were generated for the current diff.",
@@ -443,6 +469,7 @@ export const createCatchCommandResult = async (
     diff,
     true,
     executed.reports,
+    executed.hardeningCandidates,
     executed.stats,
   );
 };
@@ -468,7 +495,12 @@ export const runCatchCommand = async (
 
   if (options.output === "json") {
     writeStdout(
-      formatJsonReport(result.reports, result.stats, result.statusMessage),
+      formatJsonReport(
+        result.reports,
+        result.stats,
+        result.statusMessage,
+        result.hardeningCandidates,
+      ),
     );
 
     return;
@@ -486,6 +518,7 @@ export const runCatchCommand = async (
       riskReasons: result.diff.riskReasons ?? [],
       totalTestsGenerated: result.stats?.totalTestsGenerated,
       weakCatchCount: result.stats?.weakCatchCount,
+      hardeningCandidateCount: result.stats?.hardeningCandidateCount,
       reportsGenerated: result.stats?.reportsGenerated,
       duration: result.stats?.duration,
       estimatedCost: result.stats?.estimatedCost,

@@ -15,13 +15,14 @@ const defaultStats: RunStats = {
   testsPassedOnParent: 8,
   testsFailedOnChild: 4,
   weakCatchCount: 2,
+  hardeningCandidateCount: 3,
   assessedAsTP: 1,
   assessedAsFP: 1,
   assessedAsUncertain: 0,
   reportsGenerated: 1,
   byWorkflow: {
-    dodgyDiff: { generated: 6, weakCatches: 1 },
-    intentAware: { generated: 4, weakCatches: 1 },
+    dodgyDiff: { generated: 6, weakCatches: 1, hardeningCandidates: 2 },
+    intentAware: { generated: 4, weakCatches: 1, hardeningCandidates: 1 },
   },
   llmCallCount: 15,
   estimatedTokens: 50_000,
@@ -72,6 +73,7 @@ describe("formatPRComment", () => {
     expect(result).toContain("Is this expected?");
     expect(result).toContain("1 potential regression");
     expect(result).toContain("strong-catch");
+    expect(result).toContain("3 hardening candidates retained");
   });
 
   it("pluralizes for multiple reports", () => {

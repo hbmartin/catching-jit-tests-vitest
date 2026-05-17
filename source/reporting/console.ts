@@ -13,6 +13,7 @@ interface CatchResultSummary {
   riskReasons: readonly string[];
   totalTestsGenerated?: number;
   weakCatchCount?: number;
+  hardeningCandidateCount?: number;
   reportsGenerated?: number;
   duration?: string;
   estimatedCost?: number;
@@ -44,6 +45,12 @@ export const formatCatchResult = (summary: CatchResultSummary): string => {
 
   if (summary.weakCatchCount !== undefined) {
     lines.push(`Weak catches: ${String(summary.weakCatchCount)}`);
+  }
+
+  if (summary.hardeningCandidateCount !== undefined) {
+    lines.push(
+      `Hardening candidates: ${String(summary.hardeningCandidateCount)}`,
+    );
   }
 
   if (summary.reportsGenerated !== undefined) {

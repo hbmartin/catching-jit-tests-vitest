@@ -30,7 +30,7 @@ function formatPRComment(
   const footer =
     stats === null
       ? ""
-      : `\n---\n<sub>Generated ${String(stats.totalTestsGenerated)} tests across ${String(stats.filesAnalyzed)} files in ${stats.duration}. ${String(stats.weakCatchCount)} weak catches found, ${String(reports.length)} passed assessment threshold.</sub>\n`;
+      : `\n---\n<sub>Generated ${String(stats.totalTestsGenerated)} tests across ${String(stats.filesAnalyzed)} files in ${stats.duration}. ${String(stats.weakCatchCount)} weak catches found, ${String(stats.hardeningCandidateCount)} hardening candidates retained, ${String(reports.length)} passed assessment threshold.</sub>\n`;
 
   return `## JiTTest: Behavior Change Detection
 

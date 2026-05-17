@@ -50,6 +50,7 @@ describe("formatCatchResult", () => {
       riskReasons: ["Touches payment or billing flows."],
       totalTestsGenerated: 3,
       weakCatchCount: 1,
+      hardeningCandidateCount: 2,
       reportsGenerated: 1,
       duration: "8s",
       estimatedCost: 0.0042,
@@ -74,6 +75,7 @@ describe("formatCatchResult", () => {
     });
 
     expect(result).toContain("Tests generated: 3");
+    expect(result).toContain("Hardening candidates: 2");
     expect(result).toContain("Reports generated: 1");
     expect(result).toContain("1. Unexpected behavior change detected");
   });

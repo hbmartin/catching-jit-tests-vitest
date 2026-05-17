@@ -47,9 +47,13 @@ export type {
   InferredRisk,
   MutantCandidate,
 } from "./generation/types.js";
-export { harvestWeakCatches } from "./harvest/harvester.js";
+export {
+  harvestHardeningCandidates,
+  harvestWeakCatches,
+} from "./harvest/harvester.js";
 export type {
   BehaviorChange,
+  HardeningCandidate,
   WeakCatch,
 } from "./harvest/types.js";
 export { generateBehaviorReport } from "./reporting/behavior-change.js";
@@ -77,6 +81,7 @@ export {
   engineerFeedbackSchema,
   failureAnalysisSchema,
   generatedTestSchema,
+  hardeningCandidateSchema,
   inferRisksResponseSchema,
   inferredRiskSchema,
   judgeOutputSchema,

@@ -1,9 +1,11 @@
 import type {
   BehaviorChange as RuntimeBehaviorChange,
+  HardeningCandidate as RuntimeHardeningCandidate,
   WeakCatch as RuntimeWeakCatch,
 } from "../runtime-schemas.js";
 
 type BehaviorChange = RuntimeBehaviorChange;
+type HardeningCandidate = RuntimeHardeningCandidate;
 type WeakCatch = RuntimeWeakCatch;
 
 type BehaviorChangeType =
@@ -18,4 +20,9 @@ type BehaviorChangeType =
   | "type-changed"
   | "other";
 
-export type { BehaviorChange, BehaviorChangeType, WeakCatch };
+export type {
+  BehaviorChange,
+  BehaviorChangeType,
+  HardeningCandidate,
+  WeakCatch,
+};

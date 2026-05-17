@@ -133,6 +133,14 @@ export const weakCatchSchema = z.object({
 
 export type WeakCatch = z.infer<typeof weakCatchSchema>;
 
+export const hardeningCandidateSchema = z.object({
+  test: generatedTestSchema,
+  parentResult: testResultSchema,
+  childResult: testResultSchema,
+});
+
+export type HardeningCandidate = z.infer<typeof hardeningCandidateSchema>;
+
 export const dualExecutionResultSchema = z.object({
   test: generatedTestSchema,
   parentOutcome: testResultSchema,
@@ -284,6 +292,7 @@ export const runStatsSchema = z.object({
   testsPassedOnParent: z.number().nonnegative(),
   testsFailedOnChild: z.number().nonnegative(),
   weakCatchCount: z.number().nonnegative(),
+  hardeningCandidateCount: z.number().nonnegative(),
   assessedAsTP: z.number().nonnegative(),
   assessedAsFP: z.number().nonnegative(),
   assessedAsUncertain: z.number().nonnegative(),
@@ -292,10 +301,12 @@ export const runStatsSchema = z.object({
     dodgyDiff: z.object({
       generated: z.number().nonnegative(),
       weakCatches: z.number().nonnegative(),
+      hardeningCandidates: z.number().nonnegative(),
     }),
     intentAware: z.object({
       generated: z.number().nonnegative(),
       weakCatches: z.number().nonnegative(),
+      hardeningCandidates: z.number().nonnegative(),
     }),
   }),
   llmCallCount: z.number().nonnegative(),
