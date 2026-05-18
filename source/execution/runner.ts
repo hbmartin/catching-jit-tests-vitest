@@ -1,4 +1,4 @@
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { GeneratedTest } from "../generation/types.js";
 import {
@@ -18,7 +18,50 @@ interface VitestRunResult {
   readonly executionLog: string;
 }
 
-function resolveProjectPath(projectDir: string, relativePath: string): string {
+function isPathInside(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return (
+    relative === "" ||
+    (relative.length > 0 &&
+      relative !== ".." &&
+      !relative.startsWith(`..${path.sep}`) &&
+      !path.isAbsolute(relative))
+  );
+}
+
+async function resolveRealTargetPath(
+  root: string,
+  realRoot: string,
+  target: string,
+): Promise<string> {
+  const segments = path.relative(root, target).split(path.sep).filter(Boolean);
+  let currentLexicalPath = root;
+  let currentRealPath = realRoot;
+
+  for (const [index, segment] of segments.entries()) {
+    currentLexicalPath = path.join(currentLexicalPath, segment);
+    try {
+      currentRealPath = await realpath(currentLexicalPath);
+    } catch (error) {
+      const { code } = error as NodeJS.ErrnoException;
+      if (code === "ENOENT") {
+        return path.join(currentRealPath, ...segments.slice(index));
+      }
+      throw error;
+    }
+
+    if (!isPathInside(realRoot, currentRealPath)) {
+      return currentRealPath;
+    }
+  }
+
+  return currentRealPath;
+}
+
+async function resolveProjectPath(
+  projectDir: string,
+  relativePath: string,
+): Promise<string> {
   const root = path.resolve(projectDir);
   if (relativePath.trim().length === 0 || path.isAbsolute(relativePath)) {
     throw new Error(`Path must be project-relative: ${relativePath}`);
@@ -35,6 +78,12 @@ function resolveProjectPath(projectDir: string, relativePath: string): string {
     throw new Error(`Path escapes project root: ${relativePath}`);
   }
 
+  const realRoot = await realpath(root);
+  const realResolved = await resolveRealTargetPath(root, realRoot, resolved);
+  if (!isPathInside(realRoot, realResolved) || realResolved === realRoot) {
+    throw new Error(`Path escapes project root: ${relativePath}`);
+  }
+
   return resolved;
 }
 
@@ -42,7 +91,7 @@ async function writeTestFile(
   projectDir: string,
   test: GeneratedTest,
 ): Promise<string> {
-  const fullPath = resolveProjectPath(projectDir, test.testFilePath);
+  const fullPath = await resolveProjectPath(projectDir, test.testFilePath);
   const dir = path.dirname(fullPath);
   await mkdir(dir, { recursive: true });
   await writeFile(fullPath, test.code, "utf-8");
@@ -54,7 +103,7 @@ async function removeTestFile(
   test: GeneratedTest,
 ): Promise<void> {
   try {
-    const fullPath = resolveProjectPath(projectDir, test.testFilePath);
+    const fullPath = await resolveProjectPath(projectDir, test.testFilePath);
     await unlink(fullPath);
   } catch {
     // File might not exist, or generation may have produced an unsafe path.
@@ -81,7 +130,7 @@ async function applySourceOverride(
   projectDir: string,
   override: SourceOverride,
 ): Promise<SourceOverrideBackup> {
-  const fullPath = resolveProjectPath(projectDir, override.filePath);
+  const fullPath = await resolveProjectPath(projectDir, override.filePath);
   const dir = path.dirname(fullPath);
   await mkdir(dir, { recursive: true });
 
@@ -107,7 +156,7 @@ async function restoreSourceOverride(
   projectDir: string,
   backup: SourceOverrideBackup,
 ): Promise<void> {
-  const fullPath = resolveProjectPath(projectDir, backup.filePath);
+  const fullPath = await resolveProjectPath(projectDir, backup.filePath);
 
   if (backup.originalCode === null) {
     try {
@@ -125,15 +174,23 @@ async function restoreSourceOverrides(
   projectDir: string,
   backups: readonly SourceOverrideBackup[],
 ): Promise<void> {
+  const failures: string[] = [];
   for (const backup of [...backups].reverse()) {
     try {
       await restoreSourceOverride(projectDir, backup);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      failures.push(`${backup.filePath}: ${message}`);
       logger.warn(
         `Failed to restore source override ${backup.filePath}: ${message}`,
       );
     }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(
+      `Failed to restore source overrides: ${failures.join("; ")}`,
+    );
   }
 }
 
@@ -156,10 +213,11 @@ async function runVitest(
   sourceOverrides: readonly SourceOverride[] = [],
 ): Promise<VitestRunResult> {
   for (const sourceOverride of sourceOverrides) {
-    resolveProjectPath(projectDir, sourceOverride.filePath);
+    await resolveProjectPath(projectDir, sourceOverride.filePath);
   }
 
   const overrideBackups: SourceOverrideBackup[] = [];
+  let runResult: VitestRunResult;
 
   try {
     await Promise.all(testFiles.map((test) => writeTestFile(projectDir, test)));
@@ -189,7 +247,7 @@ async function runVitest(
       },
     );
 
-    return {
+    runResult = {
       results: mapResultsByFile(
         projectDir,
         parseVitestJsonOutput(result.stdout),
@@ -199,13 +257,19 @@ async function runVitest(
   } catch (err: unknown) {
     if (err instanceof CommandError && err.stdout.length > 0) {
       try {
-        return {
+        runResult = {
           results: mapResultsByFile(
             projectDir,
             parseVitestJsonOutput(err.stdout),
           ),
           executionLog: [err.stdout, err.stderr].filter(Boolean).join("\n"),
         };
+        return await cleanupRunVitestFiles(
+          projectDir,
+          overrideBackups,
+          testFiles,
+          runResult,
+        );
       } catch {
         logger.error("Failed to parse Vitest output from error");
       }
@@ -220,7 +284,7 @@ async function runVitest(
     } else {
       errorLog = String(err);
     }
-    return {
+    runResult = {
       results: new Map(
         testFiles.map((test) => [
           normalizeResultPath(projectDir, test.testFilePath),
@@ -236,12 +300,36 @@ async function runVitest(
       ),
       executionLog: errorLog,
     };
-  } finally {
-    await restoreSourceOverrides(projectDir, overrideBackups);
-    await Promise.all(
-      testFiles.map((test) => removeTestFile(projectDir, test)),
-    );
   }
+
+  return cleanupRunVitestFiles(
+    projectDir,
+    overrideBackups,
+    testFiles,
+    runResult,
+  );
+}
+
+async function cleanupRunVitestFiles(
+  projectDir: string,
+  overrideBackups: readonly SourceOverrideBackup[],
+  testFiles: readonly GeneratedTest[],
+  runResult: VitestRunResult,
+): Promise<VitestRunResult> {
+  let restoreError: unknown;
+  try {
+    await restoreSourceOverrides(projectDir, overrideBackups);
+  } catch (error) {
+    restoreError = error;
+  }
+
+  await Promise.all(testFiles.map((test) => removeTestFile(projectDir, test)));
+
+  if (restoreError) {
+    throw restoreError;
+  }
+
+  return runResult;
 }
 
 function buildDefaultOutcome(test: GeneratedTest): TestResult {

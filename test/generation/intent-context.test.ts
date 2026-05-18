@@ -1,4 +1,4 @@
-import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -58,6 +58,13 @@ describe("intent context", () => {
 
     expect(escapedContext).toBe("");
     expect(absoluteContext).toBe("");
+  });
+
+  it("returns empty context when the repository root cannot be resolved", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "jittest-context-"));
+    await rm(repoRoot, { recursive: true, force: true });
+
+    await expect(loadIntentContext(repoRoot, ["issue.md"])).resolves.toBe("");
   });
 
   it("skips symlinked context files that resolve outside the repository", async () => {

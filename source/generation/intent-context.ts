@@ -41,7 +41,16 @@ async function loadIntentContext(
 ): Promise<string> {
   const sections: string[] = [];
   const resolvedRoot = path.resolve(repoRoot);
-  const realRoot = await realpath(resolvedRoot);
+  let realRoot: string;
+  try {
+    realRoot = await realpath(resolvedRoot);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(
+      `Failed to resolve intent context root ${repoRoot}: ${message}`,
+    );
+    return "";
+  }
 
   for (const contextFile of contextFiles) {
     const resolvedPath = path.resolve(resolvedRoot, contextFile);

@@ -249,7 +249,12 @@ function buildPackageManagerShellCommand(
   if (platform === "win32") {
     return {
       command: "cmd.exe",
-      args: ["/d", "/s", "/c", buildWindowsCommandLine([manager, ...args])],
+      args: [
+        "/d",
+        "/s",
+        "/c",
+        `"${buildWindowsCommandLine([manager, ...args])}"`,
+      ],
     };
   }
 

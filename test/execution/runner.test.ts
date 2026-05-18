@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -216,6 +217,70 @@ describe("runVitest", () => {
       ]),
     ).rejects.toThrow("Path escapes project root");
     await expect(access(escapedPath)).rejects.toThrow();
+  });
+
+  it("rejects source overrides through symlinked directories", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
+    const outsideDir = await mkdtemp(path.join(tmpdir(), "runner-outside-"));
+    tempDirs.push(tempDir, outsideDir);
+    await symlink(outsideDir, path.join(tempDir, "linked-source"), "dir");
+
+    const { runVitest } = await import("../../source/execution/runner.js");
+    const outsidePath = path.join(outsideDir, "escaped.ts");
+
+    await expect(
+      runVitest(tempDir, [makeTest("test/safe.jittest.test.ts")], 1000, [
+        {
+          filePath: "linked-source/escaped.ts",
+          code: "export const unsafe = true;\n",
+        },
+      ]),
+    ).rejects.toThrow("Path escapes project root");
+    await expect(access(outsidePath)).rejects.toThrow();
+  });
+
+  it("surfaces source restore failures after best-effort cleanup", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
+    const outsideDir = await mkdtemp(path.join(tmpdir(), "runner-outside-"));
+    tempDirs.push(tempDir, outsideDir);
+
+    const sourceDir = path.join(tempDir, "source");
+    const sourceFile = path.join(sourceDir, "module.ts");
+    const testFile = path.join(tempDir, "test/restore.jittest.test.ts");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(sourceFile, "export const answer = () => 42;\n", "utf-8");
+
+    const runCommandMock = vi.fn().mockImplementation(async () => {
+      await rm(sourceDir, { recursive: true, force: true });
+      await symlink(outsideDir, sourceDir, "dir");
+      return {
+        stdout: makeVitestOutput(testFile),
+        stderr: "",
+      };
+    });
+
+    vi.doMock("../../source/utils/process.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/utils/process.js")
+      >("../../source/utils/process.js");
+
+      return {
+        ...actual,
+        runCommand: runCommandMock,
+      };
+    });
+
+    const { runVitest } = await import("../../source/execution/runner.js");
+
+    await expect(
+      runVitest(tempDir, [makeTest("test/restore.jittest.test.ts")], 1000, [
+        {
+          filePath: "source/module.ts",
+          code: "export const answer = () => 0;\n",
+        },
+      ]),
+    ).rejects.toThrow("Failed to restore source overrides");
+    await expect(access(testFile)).rejects.toThrow();
   });
 });
 

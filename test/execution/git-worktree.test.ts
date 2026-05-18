@@ -144,7 +144,7 @@ describe("buildPackageManagerExecCommand", () => {
         "/d",
         "/s",
         "/c",
-        '"npm" "exec" "--" "vitest" "run" "dir with spaces/a.test.ts"',
+        '""npm" "exec" "--" "vitest" "run" "dir with spaces/a.test.ts""',
       ],
     });
   });

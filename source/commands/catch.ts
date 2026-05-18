@@ -337,6 +337,14 @@ const recordAssessmentFeedback = async (input: {
   }
 };
 
+const selectAssessmentExecutionLog = (
+  executionLog: string | undefined,
+  failureMessage: string,
+): string =>
+  executionLog && executionLog.trim().length > 0
+    ? executionLog
+    : failureMessage;
+
 const assessWeakCatches = async (input: {
   options: CatchCommandOptions;
   weakCatches: ReturnType<typeof harvestWeakCatches>;
@@ -356,7 +364,10 @@ const assessWeakCatches = async (input: {
     const assessment = await assessWeakCatch(
       weakCatch,
       input.diff,
-      weakCatch.executionLog ?? weakCatch.childResult.failureMessage,
+      selectAssessmentExecutionLog(
+        weakCatch.executionLog,
+        weakCatch.childResult.failureMessage,
+      ),
       input.llm,
       input.config,
     );
@@ -567,3 +578,4 @@ export const runCatchCommand = async (
 };
 
 export type { CatchCommandResult };
+export { selectAssessmentExecutionLog };

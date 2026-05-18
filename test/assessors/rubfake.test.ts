@@ -126,6 +126,20 @@ describe("evaluateRubFake", () => {
     expect(result.rationale).toContain("directly changes boolean logic");
   });
 
+  it("lowers boolean flip confidence for unspaced condition comparisons", () => {
+    const ctx = makeContext({
+      diff: {
+        ...makeContext().diff,
+        rawDiff: "-if(a>b) return true;\n+if(a<b) return true;",
+      },
+    });
+
+    const result = evaluateRubFake(ctx);
+
+    expect(result.score).toBe(0.35);
+    expect(result.rationale).toContain("directly changes boolean logic");
+  });
+
   it("detects not implemented placeholders as false positives", () => {
     const ctx = makeContext({
       executionLog: "Error: not implemented",
