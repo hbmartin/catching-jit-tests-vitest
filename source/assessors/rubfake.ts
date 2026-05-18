@@ -135,7 +135,7 @@ const diffChangedLinePattern = /^[+-]/;
 const booleanLogicPattern =
   /\b(true|false)\b|!|&&|\|\||===|!==|<=|>=|(?:\s[<>]\s)/;
 const relationalConditionPattern =
-  /\b(?:if|while)\s*\(.*?(?:<=|>=|<|>).*?\)|\bfor\s*\([^;]*;[^;]*(?:<=|>=|<|>)[^;]*;/;
+  /\b(?:if|while)\s*\(.*?(?:<=|>=|(?<!<)<(?!<)|(?<!>)>(?!>)).*?\)|\bfor\s*\([^;]*;[^;]*(?:<=|>=|(?<!<)<(?!<)|(?<!>)>(?!>))[^;]*;/;
 const nullishPattern = /\b(null|undefined)\b/;
 
 function diffText(ctx: RuleContext): string {

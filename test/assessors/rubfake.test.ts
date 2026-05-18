@@ -130,7 +130,7 @@ describe("evaluateRubFake", () => {
     const ctx = makeContext({
       diff: {
         ...makeContext().diff,
-        rawDiff: "-if(a>b) return true;\n+if(a<b) return true;",
+        rawDiff: "-if(a>b) return value;\n+if(a<b) return value;",
       },
     });
 
@@ -144,7 +144,7 @@ describe("evaluateRubFake", () => {
     const ctx = makeContext({
       diff: {
         ...makeContext().diff,
-        rawDiff: "-if(foo(a)>b) return true;\n+if(foo(a)<b) return true;",
+        rawDiff: "-if(foo(a)>b) return value;\n+if(foo(a)<b) return value;",
       },
     });
 
@@ -152,6 +152,28 @@ describe("evaluateRubFake", () => {
 
     expect(result.score).toBe(0.35);
     expect(result.rationale).toContain("directly changes boolean logic");
+  });
+
+  it("does not lower boolean flip confidence for bit-shift conditions", () => {
+    const cases = [
+      "-if(a<<b) return value;\n+if(a>>b) return value;",
+      "-while(x<<2) run();\n+while(x>>2) run();",
+      "-for(let i=0;i<<limit;i++) run();\n+for(let i=0;i>>limit;i++) run();",
+    ];
+
+    for (const rawDiff of cases) {
+      const ctx = makeContext({
+        diff: {
+          ...makeContext().diff,
+          rawDiff,
+        },
+      });
+
+      const result = evaluateRubFake(ctx);
+
+      expect(result.score).toBe(0.7);
+      expect(result.rationale).not.toContain("directly changes boolean logic");
+    }
   });
 
   it("detects not implemented placeholders as false positives", () => {
