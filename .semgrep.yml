@@ -1,0 +1,34 @@
+rules:
+  - id: run-vitest-cleanup-outside-parse-catch
+    message: Keep cleanupRunVitestFiles outside parse-only try/catch blocks so restore failures propagate unchanged.
+    languages:
+      - typescript
+    severity: ERROR
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              try {
+                ...
+                parseVitestJsonOutput(...)
+                ...
+              } catch {
+                ...
+              }
+          - pattern-inside: |
+              try {
+                ...
+                parseVitestJsonOutput(...)
+                ...
+              } catch ($ERR) {
+                ...
+              }
+      - pattern: await cleanupRunVitestFiles(...)
+  - id: rubfake-relational-condition-excludes-shifts
+    message: Keep relationalConditionPattern from treating << or >> as relational comparisons.
+    languages:
+      - typescript
+    severity: ERROR
+    paths:
+      include:
+        - source/assessors/rubfake.ts
+    pattern-regex: 'relationalConditionPattern\s*=\s*/[^;\n]*(?:\|<\|>|\|>\|<)[^;\n]*/;'
