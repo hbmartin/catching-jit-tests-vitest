@@ -397,6 +397,7 @@
         "source/assessors/**",
         "source/reporting/**",
         "source/prompts/**",
+        "source/version.ts",
         "source/utils/llm-client.ts",
         "source/utils/logger.ts",
         "source/utils/concurrency.ts"
@@ -421,6 +422,23 @@
               }
             },
             "noExcessiveLinesPerFunction": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["scripts/**/*.mjs"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noNodejsModules": "off",
+            "noProcessGlobal": "off"
+          },
+          "style": {
+            "noProcessEnv": "off"
+          },
+          "suspicious": {
+            "noConsole": "off"
           }
         }
       }
