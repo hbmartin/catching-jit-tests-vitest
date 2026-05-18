@@ -282,6 +282,76 @@ describe("runVitest", () => {
     ).rejects.toThrow("Failed to restore source overrides");
     await expect(access(testFile)).rejects.toThrow();
   });
+
+  it("does not classify cleanup failures as parse failures after command errors", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
+    const outsideDir = await mkdtemp(path.join(tmpdir(), "runner-outside-"));
+    tempDirs.push(tempDir, outsideDir);
+
+    const sourceDir = path.join(tempDir, "source");
+    const sourceFile = path.join(sourceDir, "module.ts");
+    const testFile = path.join(tempDir, "test/restore.jittest.test.ts");
+    await mkdir(sourceDir, { recursive: true });
+    await writeFile(sourceFile, "export const answer = () => 42;\n", "utf-8");
+
+    const runCommandMock = vi.fn();
+    vi.doMock("../../source/utils/process.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/utils/process.js")
+      >("../../source/utils/process.js");
+
+      runCommandMock.mockImplementation(async () => {
+        await rm(sourceDir, { recursive: true, force: true });
+        await symlink(outsideDir, sourceDir, "dir");
+        throw new actual.CommandError("Command failed: vitest", {
+          stdout: makeVitestOutput(testFile, "failed"),
+          stderr: "",
+          exitCode: 1,
+          errorCode: null,
+          cause: new Error("vitest failed"),
+        });
+      });
+
+      return {
+        ...actual,
+        runCommand: runCommandMock,
+      };
+    });
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    try {
+      const { runVitest } = await import("../../source/execution/runner.js");
+
+      await expect(
+        runVitest(tempDir, [makeTest("test/restore.jittest.test.ts")], 1000, [
+          {
+            filePath: "source/module.ts",
+            code: "export const answer = () => 0;\n",
+          },
+        ]),
+      ).rejects.toThrow("Failed to restore source overrides");
+
+      const errorLogs = consoleErrorSpy.mock.calls.map(([message]) =>
+        String(message),
+      );
+      expect(errorLogs).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Failed to parse Vitest output from error"),
+        ]),
+      );
+      expect(errorLogs).not.toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("Vitest execution failed"),
+        ]),
+      );
+      expect(runCommandMock).toHaveBeenCalledTimes(1);
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
 });
 
 describe("validateIntentAwareTests", () => {

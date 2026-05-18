@@ -1,7 +1,12 @@
 {
   "extends": "@sindresorhus/tsconfig",
   "compilerOptions": {
+    "strict": true,
+    "rootDir": "source",
     "outDir": "dist",
+    "types": ["node"],
+    "noUncheckedSideEffectImports": true,
+    "libReplacement": false,
     "noUnusedLocals": false,
     "erasableSyntaxOnly": false
   },
