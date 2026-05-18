@@ -134,6 +134,8 @@ const rbacSignals = [
 const diffChangedLinePattern = /^[+-]/;
 const booleanLogicPattern =
   /\b(true|false)\b|!|&&|\|\||===|!==|<=|>=|(?:\s[<>]\s)/;
+const relationalConditionPattern =
+  /\b(?:if|while)\s*\([^)]*[<>][^)]*\)|\bfor\s*\([^;]*;[^;]*[<>][^;]*;/;
 const nullishPattern = /\b(null|undefined)\b/;
 
 function diffText(ctx: RuleContext): string {
@@ -149,7 +151,9 @@ function hasDirectBooleanChange(ctx: RuleContext): boolean {
     .split("\n")
     .some(
       (line) =>
-        diffChangedLinePattern.test(line) && booleanLogicPattern.test(line),
+        diffChangedLinePattern.test(line) &&
+        (booleanLogicPattern.test(line) ||
+          relationalConditionPattern.test(line)),
     );
 }
 
