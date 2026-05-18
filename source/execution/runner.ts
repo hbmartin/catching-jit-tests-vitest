@@ -217,7 +217,7 @@ async function runVitest(
   }
 
   const overrideBackups: SourceOverrideBackup[] = [];
-  let runResult: VitestRunResult;
+  let runResult: VitestRunResult | null = null;
 
   try {
     await Promise.all(testFiles.map((test) => writeTestFile(projectDir, test)));
@@ -264,42 +264,38 @@ async function runVitest(
           ),
           executionLog: [err.stdout, err.stderr].filter(Boolean).join("\n"),
         };
-        return await cleanupRunVitestFiles(
-          projectDir,
-          overrideBackups,
-          testFiles,
-          runResult,
-        );
       } catch {
         logger.error("Failed to parse Vitest output from error");
       }
     }
 
-    logger.error("Vitest execution failed");
-    let errorLog: string;
-    if (err instanceof CommandError) {
-      errorLog = [err.stdout, err.stderr].filter(Boolean).join("\n");
-    } else if (err instanceof Error) {
-      errorLog = err.message;
-    } else {
-      errorLog = String(err);
+    if (runResult === null) {
+      logger.error("Vitest execution failed");
+      let errorLog: string;
+      if (err instanceof CommandError) {
+        errorLog = [err.stdout, err.stderr].filter(Boolean).join("\n");
+      } else if (err instanceof Error) {
+        errorLog = err.message;
+      } else {
+        errorLog = String(err);
+      }
+      runResult = {
+        results: new Map(
+          testFiles.map((test) => [
+            normalizeResultPath(projectDir, test.testFilePath),
+            testResultSchema.parse({
+              testFile: test.testFilePath,
+              testName: test.behaviorDescription,
+              status: "failed" as const,
+              failureMessage: "Vitest execution failed",
+              duration: 0,
+              failureAnalysis: null,
+            }),
+          ]),
+        ),
+        executionLog: errorLog,
+      };
     }
-    runResult = {
-      results: new Map(
-        testFiles.map((test) => [
-          normalizeResultPath(projectDir, test.testFilePath),
-          testResultSchema.parse({
-            testFile: test.testFilePath,
-            testName: test.behaviorDescription,
-            status: "failed" as const,
-            failureMessage: "Vitest execution failed",
-            duration: 0,
-            failureAnalysis: null,
-          }),
-        ]),
-      ),
-      executionLog: errorLog,
-    };
   }
 
   return cleanupRunVitestFiles(
