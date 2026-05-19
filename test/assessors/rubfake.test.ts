@@ -387,6 +387,37 @@ describe("evaluateRubFake", () => {
     expect(result.rationale).not.toContain("directly changes boolean logic");
   });
 
+  it("does not treat object properties named type or interface as type declarations", () => {
+    const cases = [
+      [
+        "+const user = {",
+        '+  type: "admin",',
+        "+  enabled: false,",
+        "+};",
+      ].join("\n"),
+      [
+        "+const user = {",
+        '+  interface: "internal",',
+        "+  enabled: false,",
+        "+};",
+      ].join("\n"),
+    ];
+
+    for (const rawDiff of cases) {
+      const ctx = makeContext({
+        diff: {
+          ...makeContext().diff,
+          rawDiff,
+        },
+      });
+
+      const result = evaluateRubFake(ctx);
+
+      expect(result.score).toBe(0.35);
+      expect(result.rationale).toContain("directly changes boolean logic");
+    }
+  });
+
   it("still lowers boolean confidence after a multiline type declaration closes", () => {
     const ctx = makeContext({
       diff: {

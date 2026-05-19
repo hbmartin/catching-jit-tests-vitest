@@ -141,9 +141,9 @@ const relationalConditionPattern = new RegExp(
   String.raw`\b(?:if|while)\s*\(.*?${guardedComparisonOperatorPattern}.*?\)|\bfor\s*\([^;]*;[^;]*${guardedComparisonOperatorPattern}[^;]*;`,
 );
 const typeOnlyChangePattern =
-  /^[+-]\s*(?:(?:export|declare|default)\s+)*(type|interface)\b/;
+  /^[+-]\s*(?:(?:export|declare|default)\s+)*(type|interface)\b(?!\s*:)/;
 const typeDeclarationStartPattern =
-  /^\s*(?:(?:export|declare|default)\s+)*(type|interface)\b/;
+  /^\s*(?:(?:export|declare|default)\s+)*(type|interface)\b(?!\s*:)/;
 const typeDeclarationContinuationPattern = /^\s|^[|&})\]>]/;
 const typeAliasTerminatorPattern = /;\s*$/;
 const interfaceTerminatorPattern = /}\s*$/;
@@ -164,17 +164,17 @@ function intentText(ctx: RuleContext): string {
 }
 
 function braceDelta(code: string): number {
-  return [...code].reduce((delta, char) => {
+  let delta = 0;
+
+  for (const char of code) {
     if (char === "{") {
-      return delta + 1;
+      delta += 1;
+    } else if (char === "}") {
+      delta -= 1;
     }
+  }
 
-    if (char === "}") {
-      return delta - 1;
-    }
-
-    return delta;
-  }, 0);
+  return delta;
 }
 
 function isLikelyTypeDeclarationContinuation(code: string): boolean {

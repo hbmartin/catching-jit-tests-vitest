@@ -1,5 +1,12 @@
 # catching-jit-tests-vitest
 
+[![npm version](https://badge.fury.io/js/catching-jit-tests-vitest.svg)](https://www.npmjs.com/package/catching-jit-tests-vitest)
+[![ci](https://github.com/hbmartin/catching-jit-tests-vitest/actions/workflows/ci.yml/badge.svg)](https://github.com/hbmartin/catching-jit-tests-vitest/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/hbmartin/catching-jit-tests-vitest/graph/badge.svg?token=Po1nDYEr5f)](https://codecov.io/gh/hbmartin/catching-jit-tests-vitest)
+[![NPM License](https://img.shields.io/npm/l/catching-jit-tests-vitest?color=blue)](https://github.com/hbmartin/catching-jit-tests-vitest/blob/main/LICENSE)
+[![Context7](https://img.shields.io/badge/[]-Context7-059669)](https://context7.com/hbmartin/catching-jit-tests-vitest)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hbmartin/catching-jit-tests-vitest)
+
 Generate just-in-time Vitest tests for a git diff, run those tests on both
 sides of the change, and report the generated tests that expose behavior that
 changed from the parent branch to the PR branch.
