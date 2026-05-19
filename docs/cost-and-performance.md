@@ -142,6 +142,10 @@ install phase, configure the runner's CI cache for the package manager's
 *global* cache (not `node_modules`):
 
 ```yaml
+- uses: pnpm/action-setup@v4
+  with:
+    version: 11.1.3
+
 - uses: actions/setup-node@v4
   with:
     node-version: 22

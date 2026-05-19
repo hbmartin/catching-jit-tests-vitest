@@ -140,8 +140,20 @@ const booleanLogicPattern = new RegExp(
 const relationalConditionPattern = new RegExp(
   String.raw`\b(?:if|while)\s*\(.*?${guardedComparisonOperatorPattern}.*?\)|\bfor\s*\([^;]*;[^;]*${guardedComparisonOperatorPattern}[^;]*;`,
 );
-const typeOnlyChangePattern = /^[+-]\s*(?:type|interface)\b/;
+const typeOnlyChangePattern =
+  /^[+-]\s*(?:(?:export|declare|default)\s+)*(type|interface)\b/;
+const typeDeclarationStartPattern =
+  /^\s*(?:(?:export|declare|default)\s+)*(type|interface)\b/;
+const typeDeclarationContinuationPattern = /^\s|^[|&})\]>]/;
+const typeAliasTerminatorPattern = /;\s*$/;
+const interfaceTerminatorPattern = /}\s*$/;
 const nullishPattern = /\b(null|undefined)\b/;
+
+interface TypeDeclarationState {
+  active: boolean;
+  awaitingSemicolon: boolean;
+  braceDepth: number;
+}
 
 function diffText(ctx: RuleContext): string {
   return ctx.diff.rawDiff;
@@ -151,16 +163,136 @@ function intentText(ctx: RuleContext): string {
   return `${ctx.diff.pr.title}\n${ctx.diff.pr.body}`;
 }
 
+function braceDelta(code: string): number {
+  return [...code].reduce((delta, char) => {
+    if (char === "{") {
+      return delta + 1;
+    }
+
+    if (char === "}") {
+      return delta - 1;
+    }
+
+    return delta;
+  }, 0);
+}
+
+function isLikelyTypeDeclarationContinuation(code: string): boolean {
+  return code.trim() === "" || typeDeclarationContinuationPattern.test(code);
+}
+
+function updateTypeDeclarationState(
+  state: TypeDeclarationState,
+  code: string,
+): void {
+  state.braceDepth += braceDelta(code);
+
+  if (
+    (state.awaitingSemicolon &&
+      state.braceDepth <= 0 &&
+      typeAliasTerminatorPattern.test(code)) ||
+    (!state.awaitingSemicolon &&
+      state.braceDepth <= 0 &&
+      interfaceTerminatorPattern.test(code))
+  ) {
+    state.active = false;
+    state.awaitingSemicolon = false;
+    state.braceDepth = 0;
+  }
+}
+
+function typeDeclarationKind(
+  line: string,
+  code: string,
+): "type" | "interface" | null {
+  const changedLineMatch = typeOnlyChangePattern.exec(line);
+  if (
+    changedLineMatch?.[1] === "type" ||
+    changedLineMatch?.[1] === "interface"
+  ) {
+    return changedLineMatch[1];
+  }
+
+  const codeMatch = typeDeclarationStartPattern.exec(code);
+  if (codeMatch?.[1] === "type" || codeMatch?.[1] === "interface") {
+    return codeMatch[1];
+  }
+
+  return null;
+}
+
+function isTypeDeclarationLine(
+  state: TypeDeclarationState,
+  line: string,
+  code: string,
+): boolean {
+  const declarationKind = typeDeclarationKind(line, code);
+
+  if (declarationKind) {
+    state.active = true;
+    state.awaitingSemicolon = declarationKind === "type";
+    state.braceDepth = 0;
+    updateTypeDeclarationState(state, code);
+    return true;
+  }
+
+  if (!state.active) {
+    return false;
+  }
+
+  if (state.braceDepth === 0 && !isLikelyTypeDeclarationContinuation(code)) {
+    state.active = false;
+    state.awaitingSemicolon = false;
+    return false;
+  }
+
+  updateTypeDeclarationState(state, code);
+  return true;
+}
+
 function hasDirectBooleanChange(ctx: RuleContext): boolean {
-  return diffText(ctx)
-    .split("\n")
-    .some(
-      (line) =>
-        diffChangedLinePattern.test(line) &&
-        !typeOnlyChangePattern.test(line) &&
-        (booleanLogicPattern.test(line) ||
-          relationalConditionPattern.test(line)),
-    );
+  const oldTypeDeclaration: TypeDeclarationState = {
+    active: false,
+    awaitingSemicolon: false,
+    braceDepth: 0,
+  };
+  const newTypeDeclaration: TypeDeclarationState = {
+    active: false,
+    awaitingSemicolon: false,
+    braceDepth: 0,
+  };
+
+  for (const line of diffText(ctx).split("\n")) {
+    if (line.startsWith("@@")) {
+      oldTypeDeclaration.active = false;
+      oldTypeDeclaration.awaitingSemicolon = false;
+      oldTypeDeclaration.braceDepth = 0;
+      newTypeDeclaration.active = false;
+      newTypeDeclaration.awaitingSemicolon = false;
+      newTypeDeclaration.braceDepth = 0;
+    } else if (line.startsWith("+++") || line.startsWith("---")) {
+      // Ignore unified diff file headers.
+    } else if (line.startsWith(" ")) {
+      const code = line.slice(1);
+      isTypeDeclarationLine(oldTypeDeclaration, line, code);
+      isTypeDeclarationLine(newTypeDeclaration, line, code);
+    } else if (diffChangedLinePattern.test(line)) {
+      const state = line.startsWith("-")
+        ? oldTypeDeclaration
+        : newTypeDeclaration;
+      const code = line.slice(1);
+
+      if (
+        !isTypeDeclarationLine(state, line, code) &&
+        (booleanLogicPattern.test(code) ||
+          relationalConditionPattern.test(code))
+      ) {
+        return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 function hasDirectNullishChange(ctx: RuleContext): boolean {

@@ -98,6 +98,7 @@ From this repository:
 
 ```sh
 corepack enable
+corepack prepare pnpm@11.1.3 --activate
 pnpm install
 pnpm build
 export ANTHROPIC_API_KEY="sk-ant-..."
@@ -618,6 +619,7 @@ Install dependencies:
 
 ```sh
 corepack enable
+corepack prepare pnpm@11.1.3 --activate
 pnpm install
 ```
 
@@ -710,11 +712,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - run: corepack enable
+          cache: pnpm
 
       - run: pnpm install --frozen-lockfile
 
