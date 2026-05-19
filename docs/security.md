@@ -8,7 +8,7 @@ implications.
 ## What is sent to the LLM provider
 
 The currently supported provider is **Anthropic only**, and the default
-model is `claude-sonnet-4-20250514`.
+model is the configured default in [`source/config.ts`](../source/config.ts).
 
 For each `jittest catch` run, the following data may be sent to the
 provider in prompt payloads:
@@ -117,14 +117,17 @@ same retention and access controls you would to source code.
 
 ## Network egress
 
-The only external call is to the Anthropic API
-(`api.anthropic.com`, currently). Everything else is local:
-git, npm/pnpm/yarn registries, and Vitest.
+The only `jittest`-owned API egress is outbound HTTPS to the Anthropic API
+(`api.anthropic.com`, currently). Git operations and package-manager installs
+may contact separate external endpoints, such as git remotes and npm/pnpm/yarn
+registries. Vitest execution itself is local unless the project's tests make
+network calls.
 
 In a hermetic environment (locked-down corporate VPN, etc.) you must
-allow outbound HTTPS to `api.anthropic.com`. There is no way to point
-the client at a different URL through the CLI; it would require
-patching `source/utils/llm-client.ts`.
+allow outbound HTTPS to `api.anthropic.com`, plus any git or package-registry
+endpoints your runner needs. There is no way to point the Anthropic client at a
+different URL through the CLI; it would require patching
+`source/utils/llm-client.ts`.
 
 ## Compliance posture
 
@@ -135,8 +138,9 @@ If your organization needs an explicit statement for compliance review:
   hosted API.
 - Data sent is governed by your Anthropic API agreement and any DPA you
   have in place.
-- No telemetry, analytics, or third-party endpoints other than the
-  configured LLM provider are contacted.
+- The `jittest` application sends no telemetry, analytics, or third-party
+  requests beyond the configured LLM provider; dependency installation and git
+  fetches are runner/tooling traffic.
 - The package itself is MIT licensed (see `LICENSE`).
 - Source for the CLI is available; you can audit exactly what is sent
   by reading `source/prompts/*` and `source/utils/llm-client.ts`.

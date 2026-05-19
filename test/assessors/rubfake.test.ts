@@ -157,8 +157,11 @@ describe("evaluateRubFake", () => {
   it("does not lower boolean flip confidence for bit-shift conditions", () => {
     const cases = [
       "-if(a<<b) return value;\n+if(a>>b) return value;",
+      "-if(a<<=b) return value;\n+if(a>>=b) return value;",
       "-while(x<<2) run();\n+while(x>>2) run();",
+      "-while(x<<=2) run();\n+while(x>>=2) run();",
       "-for(let i=0;i<<limit;i++) run();\n+for(let i=0;i>>limit;i++) run();",
+      "-for(let i=0;i<<=limit;i++) run();\n+for(let i=0;i>>=limit;i++) run();",
     ];
 
     for (const rawDiff of cases) {
@@ -173,6 +176,28 @@ describe("evaluateRubFake", () => {
 
       expect(result.score).toBe(0.7);
       expect(result.rationale).not.toContain("directly changes boolean logic");
+    }
+  });
+
+  it("lowers boolean flip confidence for less-or-greater-equal condition comparisons", () => {
+    const cases = [
+      "-if(a<=b) return value;\n+if(a>=b) return value;",
+      "-while(x>=limit) run();\n+while(x<=limit) run();",
+      "-for(let i=0;i<=limit;i++) run();\n+for(let i=0;i>=limit;i--) run();",
+    ];
+
+    for (const rawDiff of cases) {
+      const ctx = makeContext({
+        diff: {
+          ...makeContext().diff,
+          rawDiff,
+        },
+      });
+
+      const result = evaluateRubFake(ctx);
+
+      expect(result.score).toBe(0.35);
+      expect(result.rationale).toContain("directly changes boolean logic");
     }
   });
 

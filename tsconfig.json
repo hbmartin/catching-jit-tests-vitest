@@ -5,6 +5,7 @@
     "rootDir": "source",
     "outDir": "dist",
     "types": ["node"],
+    "resolveJsonModule": true,
     "noUncheckedSideEffectImports": true,
     "libReplacement": false,
     "noUnusedLocals": false,

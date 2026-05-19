@@ -23,12 +23,46 @@ rules:
                 ...
               }
       - pattern: await cleanupRunVitestFiles(...)
-  - id: rubfake-relational-condition-excludes-shifts
-    message: Keep relationalConditionPattern from treating << or >> as relational comparisons.
+  - id: rubfake-comparison-operators-exclude-shift-assignments
+    message: Keep rubfake comparison detection from treating <<= or >>= as relational comparisons.
     languages:
       - typescript
     severity: ERROR
     paths:
       include:
-        - source/assessors/rubfake.ts
-    pattern-regex: 'relationalConditionPattern\s*=\s*/[^;\n]*(?:\|<\|>|\|>\|<)[^;\n]*/;'
+        - /source/assessors/rubfake.ts
+    pattern-either:
+      - pattern-regex: 'guardedComparisonOperatorPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/\.source;'
+      - pattern-regex: 'booleanLogicPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/;'
+      - pattern-regex: 'relationalConditionPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/;'
+  - id: github-actions-npm-publish-requires-node-auth-token
+    message: Set NODE_AUTH_TOKEN on npm publish steps so setup-node registry auth is available.
+    languages:
+      - yaml
+    severity: ERROR
+    paths:
+      include:
+        - /.github/workflows/*.yaml
+        - /.github/workflows/*.yml
+    patterns:
+      - pattern-regex: '(?s)-\s+name:[^\n]*\n(?:(?!\n\s*-\s+name:).)*npm\s+publish\b'
+      - pattern-not-regex: '(?s)-\s+name:[^\n]*\n(?:(?!\n\s*-\s+name:).)*NODE_AUTH_TOKEN(?:(?!\n\s*-\s+name:).)*npm\s+publish\b'
+  - id: github-actions-no-npm-latest
+    message: Do not install npm@latest in workflows; use setup-node's pinned npm or an explicit npm version.
+    languages:
+      - yaml
+    severity: ERROR
+    paths:
+      include:
+        - /.github/workflows/*.yaml
+        - /.github/workflows/*.yml
+    pattern-regex: '\bnpm\s+install\s+(?:-g|--global)\s+npm@latest\b'
+  - id: pnpm-minimum-release-age-not-zero
+    message: Keep pnpm minimumReleaseAge nonzero so workspace installs retain the supply-chain cooldown.
+    languages:
+      - yaml
+    severity: ERROR
+    paths:
+      include:
+        - /pnpm-workspace.yaml
+    pattern-regex: '(?m)^\s*minimumReleaseAge\s*:\s*0\s*$'

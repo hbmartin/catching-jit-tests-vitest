@@ -170,9 +170,10 @@ If you see `429` or token-bucket errors:
   call rate per run.
 - Contact Anthropic support to raise the workspace's rate limits.
 
-The CLI does not currently retry on 429s; a failed run will surface
-the error and exit non-zero. Treat that as an alert, not as something
-to silently retry forever.
+The Anthropic SDK retries retryable errors, including 429s, up to its default
+`maxRetries=2` with exponential backoff. If those retries are exhausted,
+`jittest` surfaces the final error and exits non-zero. Treat that as an alert,
+not as something to silently retry forever.
 
 ## "I changed the source but the result didn't change"
 

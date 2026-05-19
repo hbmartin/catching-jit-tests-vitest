@@ -1,9 +1,5 @@
-import { readFileSync } from "node:fs";
 import process from "node:process";
-
-const manifest = JSON.parse(
-  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-);
+import manifest from "../package.json" with { type: "json" };
 
 const packageVersion = manifest.version;
 const releaseTag = process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME;

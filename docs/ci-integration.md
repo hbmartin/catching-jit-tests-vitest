@@ -76,12 +76,12 @@ jobs:
         with:
           fetch-depth: 0
 
+      - run: corepack enable
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-
-      - run: corepack enable
 
       - run: pnpm install --frozen-lockfile
 
@@ -98,19 +98,51 @@ jobs:
             --pr-body "$PR_BODY" \
             --risk-threshold 0.25 \
             --report-threshold 0.4 \
-            --output github-comment \
-            > jittest-comment.md
-
-      - name: Upload JSON artifact
-        if: always()
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          pnpm exec jittest catch \
-            --base "origin/${{ github.base_ref }}" \
-            --head HEAD \
             --output json \
-            > jittest-report.json || true
+            > jittest-report.json
+
+          node <<'NODE'
+          const { readFileSync, writeFileSync } = require("node:fs");
+
+          const escapeHtml = (value) =>
+            String(value ?? "")
+              .replaceAll("&", "&amp;")
+              .replaceAll("<", "&lt;")
+              .replaceAll(">", "&gt;");
+
+          const report = JSON.parse(readFileSync("jittest-report.json", "utf8"));
+          const reports = report.reports ?? [];
+          const regressionLabel =
+            reports.length === 1 ? "regression" : "regressions";
+          const summary =
+            `${reports.length} potential ${regressionLabel} detected. ` +
+            "If these changes are intentional, no action is needed.";
+
+          if (reports.length === 0 && report.statusMessage === undefined) {
+            process.exit(0);
+          }
+
+          const lines =
+            reports.length === 0
+              ? ["## JiTTest: Status", "", escapeHtml(report.statusMessage)]
+              : [
+                  "## JiTTest: Behavior Change Detection",
+                  "",
+                  summary,
+                  "",
+                  ...reports.flatMap((item, index) => [
+                    `### ${index + 1}. ${escapeHtml(item.headline)}`,
+                    "",
+                    escapeHtml(item.senseCheck)
+                      .split("\n")
+                      .map((line) => `> ${line}`)
+                      .join("\n"),
+                    "",
+                  ]),
+                ];
+
+          writeFileSync("jittest-comment.md", `${lines.join("\n")}\n`);
+          NODE
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -131,19 +163,11 @@ jobs:
           fi
 ```
 
-Note that the workflow above runs `jittest` twice (once for the comment,
-once for JSON). That doubles cost and time. In production, prefer a single
-JSON run and convert to Markdown locally:
-
-```sh
-pnpm exec jittest catch ... --output json > jittest-report.json
-node -e '
-  const r = require("./jittest-report.json");
-  // emit your own Markdown summary here
-'
-```
-
-…or pick the format you need and accept that you lose the other.
+The workflow above runs `jittest` once in JSON mode, uploads that report, and
+derives lightweight PR comment Markdown from the same artifact. If you need the
+exact built-in comment formatting instead, choose `--output github-comment` and
+skip the JSON artifact, or move the JSON-to-Markdown conversion into a checked-in
+script you can test.
 
 ## `concurrency` matters
 
@@ -172,10 +196,11 @@ hosted runners, occasionally clean stale `*jittest*` directories under
 Nothing in `jittest` is GitHub-specific — `--output github-comment`
 just emits Markdown. For GitLab, Buildkite, Jenkins, etc.:
 
-1. Make sure both refs are present (`git fetch origin <base>:<base>`).
-2. Run `jittest catch --output json` and parse the JSON yourself.
-3. Post the Markdown (`--output github-comment`) wherever the team
-   reviews diffs — merge request descriptions, Slack, Linear, etc.
+1. Make sure both refs are present (`git fetch origin <base>`).
+2. Run `jittest catch --output json` and parse the JSON yourself, or choose
+   `--output github-comment` if you only need Markdown.
+3. Post the resulting summary wherever the team reviews diffs — merge request
+   descriptions, Slack, Linear, etc.
 
 ## Failure modes you will hit
 
