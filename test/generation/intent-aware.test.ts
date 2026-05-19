@@ -173,6 +173,76 @@ describe("intentAwareWorkflow", () => {
     );
   });
 
+  it("falls back to the head source when the base source is unavailable", async () => {
+    const getFileAtCommitMock = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(
+        "export function isAllowed(user: { role: string }) { return user.role === 'admin'; }",
+      );
+    vi.doMock("../../source/diff/extractor.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/diff/extractor.js")
+      >("../../source/diff/extractor.js");
+
+      return {
+        ...actual,
+        getFileAtCommit: getFileAtCommitMock,
+      };
+    });
+
+    const { intentAwareWorkflow } = await import(
+      "../../source/generation/intent-aware.js"
+    );
+    const tests = await intentAwareWorkflow(
+      makeDiff(),
+      process.cwd(),
+      makeLLM([makeRisk({ targetSymbol: "isAllowed" })]),
+      { testsPerFunction: 1 } as JiTTestConfig,
+    );
+
+    expect(getFileAtCommitMock).toHaveBeenNthCalledWith(
+      1,
+      "base",
+      "source/auth.ts",
+      process.cwd(),
+    );
+    expect(getFileAtCommitMock).toHaveBeenNthCalledWith(
+      2,
+      "head",
+      "source/auth.ts",
+      process.cwd(),
+    );
+    expect(tests).toHaveLength(1);
+  });
+
+  it("returns no tests when an explicit risk file path excludes the changed file", async () => {
+    const getFileAtCommitMock = vi.fn();
+    vi.doMock("../../source/diff/extractor.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/diff/extractor.js")
+      >("../../source/diff/extractor.js");
+
+      return {
+        ...actual,
+        getFileAtCommit: getFileAtCommitMock,
+      };
+    });
+
+    const { intentAwareWorkflow } = await import(
+      "../../source/generation/intent-aware.js"
+    );
+    const tests = await intentAwareWorkflow(
+      makeDiff(),
+      process.cwd(),
+      makeLLM([makeRisk({ filePath: "source/other.ts" })]),
+      { testsPerFunction: 1 } as JiTTestConfig,
+    );
+
+    expect(tests).toEqual([]);
+    expect(getFileAtCommitMock).not.toHaveBeenCalled();
+  });
+
   it("returns no tests when a risk target cannot be matched", async () => {
     const { intentAwareWorkflow } = await import(
       "../../source/generation/intent-aware.js"
