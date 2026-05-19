@@ -748,6 +748,9 @@ If you install the package into the target repository instead of building this
 repository, replace `node dist/cli.js catch` with `jittest catch` or
 `pnpm exec jittest catch`.
 
+For a manually triggered workflow that accepts a pull request number as input,
+see [Manual GitHub Action for a Pull Request](docs/manual-github-action-pr.md).
+
 ## Troubleshooting
 
 ### `ANTHROPIC_API_KEY` is missing or invalid

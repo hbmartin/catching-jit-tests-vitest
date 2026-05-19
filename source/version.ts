@@ -1,18 +1,15 @@
-import { readFileSync } from "node:fs";
+import packageManifest from "../package.json" with { type: "json" };
 
-interface PackageManifest {
+export interface PackageManifest {
   readonly version?: unknown;
 }
 
-const packageManifest = JSON.parse(
-  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-) as PackageManifest;
+export function packageManifestVersion(manifest: PackageManifest): string {
+  if (typeof manifest.version !== "string" || manifest.version.length === 0) {
+    throw new Error("package.json must declare a non-empty version.");
+  }
 
-if (
-  typeof packageManifest.version !== "string" ||
-  packageManifest.version.length === 0
-) {
-  throw new Error("package.json must declare a non-empty version.");
+  return manifest.version;
 }
 
-export const cliVersion = packageManifest.version;
+export const cliVersion = packageManifestVersion(packageManifest);

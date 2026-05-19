@@ -132,10 +132,13 @@ const rbacSignals = [
   /authorization/i,
 ];
 const diffChangedLinePattern = /^[+-]/;
+const guardedComparisonOperatorPattern =
+  /(?:(?<!<)<=(?!=)|(?<!>)>=(?!=)|(?<!<)<(?!<)|(?<!>)>(?!>))/.source;
 const booleanLogicPattern =
-  /\b(true|false)\b|!|&&|\|\||===|!==|<=|>=|(?:\s[<>]\s)/;
-const relationalConditionPattern =
-  /\b(?:if|while)\s*\(.*?(?:<=|>=|(?<!<)<(?!<)|(?<!>)>(?!>)).*?\)|\bfor\s*\([^;]*;[^;]*(?:<=|>=|(?<!<)<(?!<)|(?<!>)>(?!>))[^;]*;/;
+  /\b(true|false)\b|!|&&|\|\||===|!==|(?<!<)<=(?!=)|(?<!>)>=(?!=)|(?:\s[<>]\s)/;
+const relationalConditionPattern = new RegExp(
+  String.raw`\b(?:if|while)\s*\(.*?${guardedComparisonOperatorPattern}.*?\)|\bfor\s*\([^;]*;[^;]*${guardedComparisonOperatorPattern}[^;]*;`,
+);
 const nullishPattern = /\b(null|undefined)\b/;
 
 function diffText(ctx: RuleContext): string {
