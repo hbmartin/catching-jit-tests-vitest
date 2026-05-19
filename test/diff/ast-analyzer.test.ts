@@ -2,6 +2,7 @@ import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import {
   analyzeFileChanges,
+  extractExportNames,
   extractFunctions,
 } from "../../source/diff/ast-analyzer.js";
 
@@ -169,6 +170,52 @@ export function bar() {}`;
 
     const analysis = analyzeFileChanges(parent, child, "file.ts");
     expect(analysis.removedExports).toContain("default");
+  });
+
+  it("detects exports across declarations and named export clauses", () => {
+    const source = `export class UserService {}
+export const enabled = true, retries = 3;
+export type UserId = string;
+export interface UserRecord { id: UserId; }
+const internalName = "value";
+export { internalName as publicName };`;
+    const sf = ts.createSourceFile(
+      "exports.ts",
+      source,
+      ts.ScriptTarget.Latest,
+      true,
+    );
+
+    expect([...extractExportNames(sf)]).toEqual(
+      expect.arrayContaining([
+        "UserService",
+        "enabled",
+        "retries",
+        "UserId",
+        "UserRecord",
+        "publicName",
+      ]),
+    );
+  });
+
+  it("reports signature changes when a modified function changes parameters", () => {
+    const parent = `export function loadUser(id: string) {
+  return id;
+}`;
+    const child = `export function loadUser(id: string, includeInactive = false) {
+  return includeInactive ? id : id.trim();
+}`;
+
+    const analysis = analyzeFileChanges(parent, child, "file.ts");
+
+    expect(analysis.changedSignatures).toEqual([
+      {
+        name: "loadUser",
+        oldSignature: "export function loadUser(id: string)",
+        newSignature:
+          "export function loadUser(id: string, includeInactive = false)",
+      },
+    ]);
   });
 
   it("detects control flow changes", () => {

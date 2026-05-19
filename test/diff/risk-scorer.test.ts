@@ -1,15 +1,20 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { promisify } from "node:util";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  applyRiskAnalysis,
   computeRiskAnalysis,
   computeRiskFactors,
   computeRiskScore,
 } from "../../source/diff/risk-scorer.js";
-import type { DiffContext } from "../../source/diff/types.js";
+import type { ChangedFile, DiffContext } from "../../source/diff/types.js";
+
+const execFileAsync = promisify(execFile);
 
 function makeDiffContext(overrides: Partial<DiffContext> = {}): DiffContext {
   return {
@@ -26,6 +31,44 @@ function makeDiffContext(overrides: Partial<DiffContext> = {}): DiffContext {
     changedSymbols: [],
     ...overrides,
   };
+}
+
+function makeChangedFile(overrides: Partial<ChangedFile> = {}): ChangedFile {
+  return {
+    path: "source/feature.ts",
+    hunks: [],
+    existingTestFile: null,
+    changedExports: [],
+    changedFunctions: [],
+    touchesAuth: false,
+    touchesPayments: false,
+    touchesDataModel: false,
+    touchesAccessControl: false,
+    ...overrides,
+  };
+}
+
+async function createGitRepoWithFile(
+  repoRoot: string,
+  relativePath: string,
+): Promise<void> {
+  await execFileAsync("git", ["init"], { cwd: repoRoot });
+  await mkdir(dirname(join(repoRoot, relativePath)), { recursive: true });
+  await writeFile(join(repoRoot, relativePath), "export const value = 1;\n");
+  await execFileAsync("git", ["add", relativePath], { cwd: repoRoot });
+  await execFileAsync(
+    "git",
+    [
+      "-c",
+      "user.name=Coverage Test",
+      "-c",
+      "user.email=coverage@example.com",
+      "commit",
+      "-m",
+      "initial commit",
+    ],
+    { cwd: repoRoot },
+  );
 }
 
 afterEach(() => {
@@ -145,6 +188,38 @@ describe("computeRiskFactors", () => {
     const factors = computeRiskFactors(diff);
     expect(factors.coverageGap).toBe(0.5);
   });
+
+  it("counts access-control, data-model, and non-header removed-line risk", () => {
+    const diff = makeDiffContext({
+      rawDiff: [
+        "--- a/source/security.ts",
+        "-oldPermission",
+        "+newPermission",
+      ].join("\n"),
+      files: [
+        makeChangedFile({
+          path: "source/security.ts",
+          hunks: [
+            {
+              header: "@@ -1,1 +1,1 @@",
+              oldStart: 1,
+              oldLines: 1,
+              newStart: 1,
+              newLines: 1,
+              content: "+const role = schema.permission;",
+            },
+          ],
+          touchesAccessControl: true,
+          touchesDataModel: true,
+        }),
+      ],
+    });
+
+    const factors = computeRiskFactors(diff);
+
+    expect(factors.sensitivityScore).toBe(0.85);
+    expect(factors.complexityScore).toBeGreaterThan(0);
+  });
 });
 
 describe("computeRiskScore", () => {
@@ -206,6 +281,96 @@ describe("computeRiskScore", () => {
 });
 
 describe("computeRiskAnalysis", () => {
+  it("returns an empty analysis when there are no changed files", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "risk-scorer-empty-"));
+
+    try {
+      await expect(
+        computeRiskAnalysis(repoRoot, makeDiffContext()),
+      ).resolves.toMatchObject({
+        score: 0,
+        factors: {
+          defectHistory: 0,
+        },
+        reasons: [],
+      });
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("builds reasons for sensitive, complex changes when history is unavailable", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "risk-scorer-reasons-"));
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    const hunks = Array.from({ length: 20 }, (_, index) => ({
+      header: `@@ -${String(index + 1)},1 +${String(index + 1)},1 @@`,
+      oldStart: index + 1,
+      oldLines: 1,
+      newStart: index + 1,
+      newLines: 1,
+      content: "+const encryptedSecret = database.schema.permissionFor(role);",
+    }));
+    const diff = makeDiffContext({
+      rawDiff: Array.from(
+        { length: 201 },
+        (_, index) => `+line${String(index)}`,
+      ).join("\n"),
+      files: [
+        makeChangedFile({
+          path: "source/security/schema.ts",
+          hunks,
+          touchesAccessControl: true,
+          touchesDataModel: true,
+        }),
+      ],
+    });
+
+    try {
+      const analysis = await computeRiskAnalysis(repoRoot, diff);
+
+      expect(analysis.reasons).toEqual(
+        expect.arrayContaining([
+          "Touches authorization or access-control logic.",
+          "Touches schema or data-model logic.",
+          "Touches encryption, secrets, or credential handling.",
+          "A large portion of changed files do not have nearby tests.",
+          "The diff spans multiple hunks or a high line count.",
+          "Git history could not be read, so defect-history risk was omitted from scoring.",
+        ]),
+      );
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("applies successful git history analysis to the diff context", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "risk-scorer-git-"));
+
+    try {
+      await createGitRepoWithFile(repoRoot, "source/feature.ts");
+      const diff = makeDiffContext({
+        files: [
+          makeChangedFile({
+            existingTestFile: "test/feature.test.ts",
+          }),
+        ],
+      });
+
+      const analyzed = await applyRiskAnalysis(repoRoot, diff);
+
+      expect(analyzed.riskFactors?.defectHistory).toBe(0.04);
+      expect(analyzed.riskReasons).toContain(
+        "General code churn exceeds the low-risk baseline.",
+      );
+      expect(analyzed.riskScore).toBeGreaterThan(0);
+    } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
   it("logs a warning and omits defect history when git history cannot be read", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "risk-scorer-"));
     const warnSpy = vi
