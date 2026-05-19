@@ -34,6 +34,7 @@ rules:
     pattern-either:
       - pattern-regex: 'guardedComparisonOperatorPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/\.source;'
       - pattern-regex: 'booleanLogicPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/;'
+      - pattern-regex: 'booleanLogicPattern\s*=\s*new RegExp\(\s*String\.raw`(?!(?=[^`]*\$\{guardedComparisonOperatorPattern\}))[^`]*(?:<=|>=|<|>)[^`]*`'
       - pattern-regex: 'relationalConditionPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/;'
   - id: github-actions-npm-publish-requires-node-auth-token
     message: Set NODE_AUTH_TOKEN on npm publish steps so setup-node registry auth is available.
