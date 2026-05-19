@@ -34,6 +34,15 @@ describe("runCli", () => {
     writeSpy.mockRestore();
   });
 
+  it("prints the version for the short flag", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await runCli(["-v"]);
+
+    expect(writeSpy).toHaveBeenCalledWith(`${cliVersion}\n`);
+    writeSpy.mockRestore();
+  });
+
   it("prints the version before dispatching subcommands", async () => {
     const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
 
@@ -50,6 +59,16 @@ describe("runCli", () => {
     expect(runCatchCommandMock).toHaveBeenCalled();
   });
 
+  it("prints catch help without dispatching the command", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await runCli(["catch", "--help"]);
+
+    expect(writeSpy).toHaveBeenCalled();
+    expect(runCatchCommandMock).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
   it("passes PR metadata through catch options", async () => {
     await runCli([
       "catch",
@@ -63,6 +82,51 @@ describe("runCli", () => {
       expect.objectContaining({
         prTitle: "Fix auth bug",
         prBody: "Preserve login behavior",
+      }),
+    );
+  });
+
+  it("passes all catch scalar options through parser coercion", async () => {
+    await runCli([
+      "catch",
+      "--base",
+      "main",
+      "--head",
+      "feature",
+      "--workflow",
+      "dodgy-diff",
+      "--risk-threshold",
+      "0.42",
+      "--tests-per-function",
+      "4",
+      "--timeout",
+      "45000",
+      "--output",
+      "json",
+      "--report-threshold=-0.1",
+      "--feedback-path",
+      ".cache/records.jsonl",
+      "--context-file",
+      "docs/intent.md",
+      "--context-file",
+      "docs/security.md",
+      "--cwd",
+      "/tmp/repo",
+    ]);
+
+    expect(runCatchCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        base: "main",
+        head: "feature",
+        workflow: "dodgy-diff",
+        riskThreshold: 0.42,
+        testsPerFunction: 4,
+        timeout: 45_000,
+        output: "json",
+        reportThreshold: -0.1,
+        feedbackPath: ".cache/records.jsonl",
+        contextFiles: ["docs/intent.md", "docs/security.md"],
+        cwd: "/tmp/repo",
       }),
     );
   });

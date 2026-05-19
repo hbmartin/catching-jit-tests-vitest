@@ -36,6 +36,17 @@ rules:
       - pattern-regex: 'booleanLogicPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/;'
       - pattern-regex: 'booleanLogicPattern\s*=\s*new RegExp\(\s*String\.raw`(?!(?=[^`]*\$\{guardedComparisonOperatorPattern\}))[^`]*(?:<=|>=|<|>)[^`]*`'
       - pattern-regex: 'relationalConditionPattern\s*=\s*/(?!(?=[^;\n]*\(\?<!<\)<=)(?=[^;\n]*\(\?<!>\)>=))[^;\n]*(?:<=|>=)[^;\n]*/;'
+  - id: rubfake-type-property-lookahead-allows-optional-marker
+    message: "Keep rubfake type/interface detection from treating optional properties like type?: as type declarations."
+    languages:
+      - typescript
+    severity: ERROR
+    paths:
+      include:
+        - /source/assessors/rubfake.ts
+    pattern-either:
+      - pattern-regex: 'typeOnlyChangePattern\s*=\s*/[^;\n]*\(\?!\\s\*:\)[^;\n]*/;'
+      - pattern-regex: 'typeDeclarationStartPattern\s*=\s*/[^;\n]*\(\?!\\s\*:\)[^;\n]*/;'
   - id: github-actions-npm-publish-requires-node-auth-token
     message: Set NODE_AUTH_TOKEN on npm publish steps so setup-node registry auth is available.
     languages:

@@ -122,6 +122,18 @@ describe("parseCatchCommandOptions", () => {
     expect(
       parseCatchCommandOptions({ parallelWorktrees: "yes" }).parallelWorktrees,
     ).toBe(true);
+    expect(
+      parseCatchCommandOptions({ parallelWorktrees: "1" }).parallelWorktrees,
+    ).toBe(true);
+    expect(
+      parseCatchCommandOptions({ parallelWorktrees: "0" }).parallelWorktrees,
+    ).toBe(false);
+    expect(
+      parseCatchCommandOptions({ parallelWorktrees: "no" }).parallelWorktrees,
+    ).toBe(false);
+    expect(() =>
+      parseCatchCommandOptions({ parallelWorktrees: "sometimes" }),
+    ).toThrow();
   });
 
   it("rejects blank base head and cwd values", () => {

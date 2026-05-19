@@ -57,6 +57,7 @@ function makeVitestOutput(
 afterEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
+  vi.doUnmock("../../source/execution/git-worktree.js");
 
   await Promise.all(
     tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
@@ -127,6 +128,82 @@ describe("dualExecution", () => {
       expect.any(Array),
       expect.objectContaining({ cwd: childDir }),
     );
+  });
+});
+
+describe("validateIntentAwareTests", () => {
+  it("keeps tests that pass parent and fail the inferred mutant", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-validate-"));
+    tempDirs.push(tempDir);
+
+    const dodgyTest = makeTest("test/dodgy.jittest.test.ts", {
+      workflow: "dodgy-diff",
+    });
+    const killingTest = makeTest("test/kills-mutant.jittest.test.ts", {
+      workflow: "intent-aware",
+      mutantValidation: {
+        targetFilePath: "source/auth.ts",
+        mutantCode: "export const isAllowed = () => false;",
+      },
+    });
+    const survivingTest = makeTest("test/survives-mutant.jittest.test.ts", {
+      workflow: "intent-aware",
+      mutantValidation: {
+        targetFilePath: "source/auth.ts",
+        mutantCode: "export const isAllowed = () => false;",
+      },
+    });
+    const fileResult = (test: GeneratedTest, status: "passed" | "failed") => ({
+      name: path.join(tempDir, test.testFilePath),
+      status,
+      assertionResults: [
+        {
+          ancestorTitles: ["suite"],
+          title: test.behaviorDescription,
+          status,
+          failureMessages:
+            status === "failed" ? ["Expected true but received false"] : [],
+          duration: 1,
+        },
+      ],
+    });
+    const runPackageManagerExecMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          testResults: [
+            fileResult(killingTest, "passed"),
+            fileResult(survivingTest, "passed"),
+          ],
+        }),
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          testResults: [
+            fileResult(killingTest, "failed"),
+            fileResult(survivingTest, "passed"),
+          ],
+        }),
+        stderr: "",
+      });
+
+    vi.doMock("../../source/execution/git-worktree.js", () => ({
+      runPackageManagerExec: runPackageManagerExecMock,
+    }));
+
+    const { validateIntentAwareTests } = await import(
+      "../../source/execution/runner.js"
+    );
+
+    await expect(
+      validateIntentAwareTests(
+        [dodgyTest, killingTest, survivingTest],
+        tempDir,
+        500,
+      ),
+    ).resolves.toEqual([dodgyTest, killingTest]);
+    expect(runPackageManagerExecMock).toHaveBeenCalledTimes(2);
   });
 });
 
