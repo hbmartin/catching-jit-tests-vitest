@@ -72,6 +72,18 @@ describe("buildSenseCheck", () => {
     expect(msg).toContain("throws an exception");
   });
 
+  it("generates exception-removed and collection shape messages", () => {
+    expect(buildSenseCheck(makeWeakCatch("exception-removed"))).toContain(
+      "succeeds silently",
+    );
+    expect(buildSenseCheck(makeWeakCatch("missing-key"))).toContain(
+      "key/property",
+    );
+    expect(buildSenseCheck(makeWeakCatch("ordering-changed"))).toContain(
+      "ordering",
+    );
+  });
+
   it("generates default message for unknown types", () => {
     const msg = buildSenseCheck(makeWeakCatch("other"));
     expect(msg).toContain("behavioral difference");
@@ -93,5 +105,38 @@ describe("generateBehaviorReport", () => {
     );
 
     expect(report.headline).toContain("requires review");
+  });
+
+  it("uses review wording and hard dismissal estimates for likely false positives", () => {
+    const report = generateBehaviorReport(
+      {
+        assessments: [{ score: -0.5, rationale: "Looks generated" } as never],
+        combinedScore: -0.5,
+        verdict: "likely-false-positive",
+        shouldReport: true,
+        dismissalDifficulty: "hard",
+      },
+      makeWeakCatch("missing-key"),
+    );
+
+    expect(report.headline).toContain("flagged for review");
+    expect(report.details.dismissalEstimate).toBe("~10+ minutes");
+    expect(report.details.assessorRationales).toEqual(["Looks generated"]);
+  });
+
+  it("uses potential change wording and easy dismissal estimates for strong catches", () => {
+    const report = generateBehaviorReport(
+      {
+        assessments: [],
+        combinedScore: 0.8,
+        verdict: "strong-catch",
+        shouldReport: true,
+        dismissalDifficulty: "easy",
+      },
+      makeWeakCatch("return-value-changed"),
+    );
+
+    expect(report.headline).toContain("Potential unexpected behavior change");
+    expect(report.details.dismissalEstimate).toBe("~1-2 minutes");
   });
 });

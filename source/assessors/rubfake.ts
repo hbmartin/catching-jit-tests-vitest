@@ -141,9 +141,9 @@ const relationalConditionPattern = new RegExp(
   String.raw`\b(?:if|while)\s*\(.*?${guardedComparisonOperatorPattern}.*?\)|\bfor\s*\([^;]*;[^;]*${guardedComparisonOperatorPattern}[^;]*;`,
 );
 const typeOnlyChangePattern =
-  /^[+-]\s*(?:(?:export|declare|default)\s+)*(type|interface)\b(?!\s*:)/;
+  /^[+-]\s*(?:(?:export|declare|default)\s+)*(type|interface)\b(?!\s*\??\s*:)/;
 const typeDeclarationStartPattern =
-  /^\s*(?:(?:export|declare|default)\s+)*(type|interface)\b(?!\s*:)/;
+  /^\s*(?:(?:export|declare|default)\s+)*(type|interface)\b(?!\s*\??\s*:)/;
 const typeDeclarationContinuationPattern = /^\s|^[|&})\]>]/;
 const typeAliasTerminatorPattern = /;\s*$/;
 const interfaceTerminatorPattern = /}\s*$/;

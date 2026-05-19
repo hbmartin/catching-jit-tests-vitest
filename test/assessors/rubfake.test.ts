@@ -401,6 +401,18 @@ describe("evaluateRubFake", () => {
         "+  enabled: false,",
         "+};",
       ].join("\n"),
+      [
+        "+const user = {",
+        '+  type?: "admin",',
+        "+  enabled: false,",
+        "+};",
+      ].join("\n"),
+      [
+        "+const user = {",
+        '+  interface?: "internal",',
+        "+  enabled: false,",
+        "+};",
+      ].join("\n"),
     ];
 
     for (const rawDiff of cases) {
