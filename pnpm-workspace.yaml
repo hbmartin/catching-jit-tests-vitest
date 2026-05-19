@@ -1,3 +1,4 @@
 minimumReleaseAge: 1440
+minimumReleaseAgeStrict: false
 minimumReleaseAgeExclude:
   - baseline-browser-mapping
