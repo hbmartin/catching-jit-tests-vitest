@@ -119,6 +119,7 @@ jobs:
             "If these changes are intentional, no action is needed.";
 
           if (reports.length === 0 && report.statusMessage === undefined) {
+            writeFileSync("jittest-comment.md", "");
             process.exit(0);
           }
 

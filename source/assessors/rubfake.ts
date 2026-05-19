@@ -134,11 +134,13 @@ const rbacSignals = [
 const diffChangedLinePattern = /^[+-]/;
 const guardedComparisonOperatorPattern =
   /(?:(?<!<)<=(?!=)|(?<!>)>=(?!=)|(?<!<)<(?!<)|(?<!>)>(?!>))/.source;
-const booleanLogicPattern =
-  /\b(true|false)\b|!|&&|\|\||===|!==|(?<!<)<=(?!=)|(?<!>)>=(?!=)|(?:\s[<>]\s)/;
+const booleanLogicPattern = new RegExp(
+  String.raw`\b(true|false)\b|!|&&|\|\||===|!==|${guardedComparisonOperatorPattern}`,
+);
 const relationalConditionPattern = new RegExp(
   String.raw`\b(?:if|while)\s*\(.*?${guardedComparisonOperatorPattern}.*?\)|\bfor\s*\([^;]*;[^;]*${guardedComparisonOperatorPattern}[^;]*;`,
 );
+const typeOnlyChangePattern = /^[+-]\s*(?:type|interface)\b/;
 const nullishPattern = /\b(null|undefined)\b/;
 
 function diffText(ctx: RuleContext): string {
@@ -155,6 +157,7 @@ function hasDirectBooleanChange(ctx: RuleContext): boolean {
     .some(
       (line) =>
         diffChangedLinePattern.test(line) &&
+        !typeOnlyChangePattern.test(line) &&
         (booleanLogicPattern.test(line) ||
           relationalConditionPattern.test(line)),
     );

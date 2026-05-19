@@ -88,16 +88,19 @@ jobs:
           git fetch --no-tags origin "refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
           git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head:${HEAD_REF}"
 
+          PR_TITLE_DELIMITER="JITTEST_PR_TITLE_${RANDOM}_${RANDOM}"
+          PR_BODY_DELIMITER="JITTEST_PR_BODY_${RANDOM}_${RANDOM}"
+
           {
             echo "PR_NUMBER=$PR_NUMBER"
             echo "BASE_REF=$BASE_REF"
             echo "HEAD_REF=$HEAD_REF"
-            echo "PR_TITLE<<JITTEST_PR_TITLE"
+            echo "PR_TITLE<<$PR_TITLE_DELIMITER"
             gh pr view "$PR_NUMBER" --json title --jq '.title'
-            echo "JITTEST_PR_TITLE"
-            echo "PR_BODY<<JITTEST_PR_BODY"
+            echo "$PR_TITLE_DELIMITER"
+            echo "PR_BODY<<$PR_BODY_DELIMITER"
             gh pr view "$PR_NUMBER" --json body --jq '.body // ""'
-            echo "JITTEST_PR_BODY"
+            echo "$PR_BODY_DELIMITER"
           } >> "$GITHUB_ENV"
 
       - name: Run JiTTest
