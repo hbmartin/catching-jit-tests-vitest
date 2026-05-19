@@ -121,7 +121,8 @@ environment. Failures typically come from:
   the worktree install will see (most package managers honor
   environment variables for tokens).
 - A `package.json#packageManager` field that pins a version not
-  installed on the runner. Run `corepack enable` *before* `jittest`.
+  installed on the runner. This project uses `pnpm@11.1.3`; install that
+  exact version in CI with `pnpm/action-setup` *before* `jittest`.
 - Postinstall scripts that require system tooling not present on the
   runner. Either install the tooling or set `ignore-scripts` / use
   `pnpm install --ignore-scripts` — but be aware that may break the

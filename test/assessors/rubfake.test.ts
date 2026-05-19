@@ -313,10 +313,71 @@ describe("evaluateRubFake", () => {
   });
 
   it("does not lower boolean confidence for generic type syntax", () => {
+    const cases = [
+      "+type Box<T> = { value: T };",
+      "+export type Box<T> = { value: T };",
+      "+declare interface Box<T> { value: T }",
+      "+export default interface Box<T> { value: T }",
+    ];
+
+    for (const rawDiff of cases) {
+      const ctx = makeContext({
+        diff: {
+          ...makeContext().diff,
+          rawDiff,
+        },
+      });
+
+      const result = evaluateRubFake(ctx);
+
+      expect(result.score).toBe(0.7);
+      expect(result.rationale).not.toContain("directly changes boolean logic");
+    }
+  });
+
+  it("does not lower boolean confidence for multiline type declarations", () => {
+    const cases = [
+      [
+        "+export interface Box<T> {",
+        "+  compare: <U extends T>(value: U) => boolean;",
+        "+}",
+      ].join("\n"),
+      [
+        "+export type Box<T> =",
+        "+  | { value: T }",
+        "+  | ((value: T) => boolean);",
+      ].join("\n"),
+      [
+        "+export type Box<T> = {",
+        "+  compare: <U extends T>(value: U) => boolean;",
+        "+};",
+      ].join("\n"),
+    ];
+
+    for (const rawDiff of cases) {
+      const ctx = makeContext({
+        diff: {
+          ...makeContext().diff,
+          rawDiff,
+        },
+      });
+
+      const result = evaluateRubFake(ctx);
+
+      expect(result.score).toBe(0.7);
+      expect(result.rationale).not.toContain("directly changes boolean logic");
+    }
+  });
+
+  it("does not lower boolean confidence for changed lines inside type context", () => {
     const ctx = makeContext({
       diff: {
         ...makeContext().diff,
-        rawDiff: "+type Box<T> = { value: T };",
+        rawDiff: [
+          " interface Box<T> {",
+          "+  compare: <U extends T>(value: U) => boolean;",
+          " }",
+        ].join("\n"),
       },
     });
 
@@ -324,6 +385,25 @@ describe("evaluateRubFake", () => {
 
     expect(result.score).toBe(0.7);
     expect(result.rationale).not.toContain("directly changes boolean logic");
+  });
+
+  it("still lowers boolean confidence after a multiline type declaration closes", () => {
+    const ctx = makeContext({
+      diff: {
+        ...makeContext().diff,
+        rawDiff: [
+          "+export interface Box<T> {",
+          "+  value: T;",
+          "+}",
+          "+return a < b;",
+        ].join("\n"),
+      },
+    });
+
+    const result = evaluateRubFake(ctx);
+
+    expect(result.score).toBe(0.35);
+    expect(result.rationale).toContain("directly changes boolean logic");
   });
 
   it("detects refactor intent with behavior change as true positive", () => {

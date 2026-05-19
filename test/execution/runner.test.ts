@@ -136,7 +136,7 @@ describe("runVitest", () => {
     tempDirs.push(tempDir);
     await writeFile(
       path.join(tempDir, "package.json"),
-      JSON.stringify({ packageManager: "pnpm@9.0.0" }),
+      JSON.stringify({ packageManager: "pnpm@11.1.3" }),
       "utf-8",
     );
     const runCommandMock = vi.fn().mockResolvedValue({
