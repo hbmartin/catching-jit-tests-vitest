@@ -1,5 +1,9 @@
 {
-  "threshold": 0.5,
+  "threshold": 0,
+  "mode": "strict",
+  "minTokens": 50,
+  "minLines": 5,
+  "format": ["typescript"],
   "reporters": ["console", "markdown"],
   "output": "report",
   "ignore": [
@@ -14,6 +18,7 @@
     "**/.next/**",
     "**/report/**",
     "**/reports/**",
+    "**/test/**",
     "**/*.json",
     "**/*.tsx",
     "**/*.test.ts",

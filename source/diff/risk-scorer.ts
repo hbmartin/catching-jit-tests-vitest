@@ -131,11 +131,13 @@ function computeCoverageGap(diff: DiffContext): number {
 }
 
 function computeRiskFactors(diff: DiffContext): RiskFactors {
+  const defectHistory = diff.riskFactors ? diff.riskFactors.defectHistory : 0;
+
   return {
     sensitivityScore: calculateSensitivityScore(diff),
     complexityScore: computeComplexityScore(diff),
     coverageGap: computeCoverageGap(diff),
-    defectHistory: diff.riskFactors?.defectHistory ?? 0,
+    defectHistory,
   };
 }
 
