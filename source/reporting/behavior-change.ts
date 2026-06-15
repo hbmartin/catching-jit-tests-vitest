@@ -1,5 +1,5 @@
 import type { AggregatedAssessment } from "../assessors/types.js";
-import type { WeakCatch } from "../harvest/types.js";
+import type { BehaviorChangeType, WeakCatch } from "../harvest/types.js";
 import { behaviorReportSchema } from "../runtime-schemas.js";
 
 import type { BehaviorReport } from "./types.js";
@@ -28,8 +28,9 @@ function buildHeadline(
 
 function buildSenseCheck(weakCatch: WeakCatch): string {
   const bc = weakCatch.behaviorChange;
+  const changeType: BehaviorChangeType = bc.changeType;
 
-  switch (bc.changeType) {
+  switch (changeType) {
     case "boolean-flipped": {
       return `This expression used to evaluate to **${bc.parentBehavior}**, but now evaluates to **${bc.childBehavior}**. Is this expected?`;
     }

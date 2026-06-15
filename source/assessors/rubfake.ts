@@ -310,6 +310,13 @@ function touchesAccessControl(ctx: RuleContext): boolean {
   );
 }
 
+function matchesIntentSignal(
+  ctx: RuleContext,
+  signals: readonly RegExp[],
+): boolean {
+  return signals.some((pattern) => pattern.test(intentText(ctx)));
+}
+
 const falsePositiveRules: readonly RubFakeRule[] = [
   {
     name: "broken_mock",
@@ -654,14 +661,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
     confidence: "medium",
     sources: ["diff"],
     evaluate(ctx: RuleContext): PatternMatch | null {
-      const title = ctx.diff.pr.title.toLowerCase();
-      const body = (ctx.diff.pr.body || "").toLowerCase();
-
-      const isRefactor = refactorSignals.some(
-        (p) => p.test(title) || p.test(body),
-      );
-
-      if (isRefactor) {
+      if (matchesIntentSignal(ctx, refactorSignals)) {
         return {
           score: 0.8,
           evidence:
@@ -700,14 +700,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
     confidence: "medium",
     sources: ["diff"],
     evaluate(ctx: RuleContext): PatternMatch | null {
-      const title = ctx.diff.pr.title.toLowerCase();
-      const body = (ctx.diff.pr.body || "").toLowerCase();
-
-      const isAddOnly = addOnlySignals.some(
-        (p) => p.test(title) || p.test(body),
-      );
-
-      if (isAddOnly) {
+      if (matchesIntentSignal(ctx, addOnlySignals)) {
         return {
           score: 0.7,
           evidence: "PR intent is additive-only, but existing behavior changed",

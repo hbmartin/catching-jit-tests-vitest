@@ -2,6 +2,7 @@ import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 
 import { logger } from "../utils/logger.js";
+import { isPathInside } from "../utils/path.js";
 
 const maxContextFileBytes = 12_000;
 
@@ -22,17 +23,6 @@ function truncateContext(value: string): string {
   }
 
   return `${value.slice(0, endIndex)}\n...[truncated]`;
-}
-
-function isPathInside(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === "" ||
-    (relative.length > 0 &&
-      relative !== ".." &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative))
-  );
 }
 
 async function loadIntentContext(

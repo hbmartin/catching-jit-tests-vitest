@@ -7,6 +7,7 @@ import {
 } from "../runtime-schemas.js";
 import { chunk } from "../utils/concurrency.js";
 import { logger } from "../utils/logger.js";
+import { isPathInside } from "../utils/path.js";
 import { CommandError } from "../utils/process.js";
 
 import { runPackageManagerExec } from "./git-worktree.js";
@@ -16,17 +17,6 @@ import type { DualExecutionResult, TestResult } from "./types.js";
 interface VitestRunResult {
   readonly results: ReadonlyMap<string, TestResult>;
   readonly executionLog: string;
-}
-
-function isPathInside(root: string, candidate: string): boolean {
-  const relative = path.relative(root, candidate);
-  return (
-    relative === "" ||
-    (relative.length > 0 &&
-      relative !== ".." &&
-      !relative.startsWith(`..${path.sep}`) &&
-      !path.isAbsolute(relative))
-  );
 }
 
 async function resolveRealTargetPath(
