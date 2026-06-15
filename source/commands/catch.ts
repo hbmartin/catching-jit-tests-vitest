@@ -78,17 +78,6 @@ const createCommandConfig = (options: CatchCommandOptions) =>
     },
   });
 
-const combineStatusMessages = (
-  ...messages: readonly (string | undefined)[]
-): string | undefined => {
-  const present = messages.filter(
-    (message): message is string =>
-      message !== undefined && message.trim().length > 0,
-  );
-
-  return present.length === 0 ? undefined : present.join(" ");
-};
-
 const createResult = (
   options: CatchCommandOptions,
   workflow: CatchCommandOptions["workflow"],
@@ -487,7 +476,6 @@ const createNoTestsResult = (
   config: ReturnType<typeof createCommandConfig>,
   diff: DiffContext,
   stats: RunStats | null,
-  statusMessage?: string,
 ): CatchCommandResult =>
   createResult(
     options,
@@ -498,10 +486,7 @@ const createNoTestsResult = (
     [],
     [],
     stats,
-    combineStatusMessages(
-      "No tests were generated for the current diff.",
-      statusMessage,
-    ),
+    "No tests were generated for the current diff.",
   );
 
 const buildNoExecutionStats = (input: {
@@ -560,7 +545,6 @@ export const createCatchCommandResult = async (
         allTests,
         llmStats: llm.getStats(),
       }),
-      llm.getBudgetStatusMessage(),
     );
   }
 
@@ -585,7 +569,6 @@ export const createCatchCommandResult = async (
     executed.reports,
     executed.hardeningCandidates,
     executed.stats,
-    llm.getBudgetStatusMessage(),
   );
 };
 

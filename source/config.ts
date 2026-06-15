@@ -29,7 +29,13 @@ const booleanOptionSchema = z.preprocess((value) => {
 const jitTestConfigSchema = z.object({
   llm: z.object({
     provider: z.literal("openrouter").default("openrouter"),
-    model: z.string().trim().min(1),
+    model: z
+      .string()
+      .trim()
+      .min(
+        1,
+        "An OpenRouter model is required. Set --llm-model, OPENROUTER_MODEL, or llm.model.",
+      ),
     apiKey: z.string().default(""),
     maxTokens: z.number().int().positive().default(4096),
     providerOptions: z

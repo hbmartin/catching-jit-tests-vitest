@@ -1,0 +1,29 @@
+{
+  "threshold": 0.5,
+  "reporters": ["console", "markdown"],
+  "output": "report",
+  "ignore": [
+    "**/node_modules/**",
+    "**/dist/**",
+    "**/coverage/**",
+    "**/tests/**",
+    "**/scripts/**",
+    "**/evals/**",
+    "**/.git/**",
+    "**/.github/workflows/**",
+    "**/.next/**",
+    "**/report/**",
+    "**/reports/**",
+    "**/*.json",
+    "**/*.tsx",
+    "**/*.test.ts",
+    "**/*.css",
+    "**/*.md",
+    "**/*.yml",
+    "**/*.yaml"
+  ],
+  "maxSize": "512kb",
+  "absolute": false,
+  "noColors": true,
+  "silent": false
+}

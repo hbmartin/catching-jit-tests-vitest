@@ -449,9 +449,6 @@ describe("createCatchCommandResult", () => {
       llmUsage: exhaustedUsage,
     });
     mocks.isBudgetExhaustedMock.mockReturnValue(true);
-    mocks.getBudgetStatusMessageMock.mockReturnValue(
-      "LLM token budget was exhausted; future LLM calls were skipped.",
-    );
     mocks.dodgyDiffWorkflowMock.mockResolvedValue([dodgyTest]);
     mocks.dualExecutionMock.mockResolvedValue([
       makeDualResult(dodgyTest, "failed"),
@@ -471,7 +468,9 @@ describe("createCatchCommandResult", () => {
       expect.any(Object),
       expect.objectContaining({ llmJudgeEnabled: false }),
     );
-    expect(result.statusMessage).toContain("LLM token budget was exhausted");
+    // Budget exhaustion is surfaced via structured stats, not duplicated into
+    // statusMessage (reporters render it from stats.llmUsage.budget).
+    expect(result.statusMessage).toBeUndefined();
     expect(result.stats?.llmUsage.budget.status).toBe("exhausted");
   });
 });
