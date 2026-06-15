@@ -94,10 +94,12 @@ candidates" in JSON output because they may still be useful regression tests.
 - A TypeScript project that can run tests with Vitest
 - One of `pnpm`, `npm`, or `yarn` available for dependency installation in
   temporary worktrees
-- `ANTHROPIC_API_KEY` in the environment
+- `OPENROUTER_API_KEY` in the environment
+- An OpenRouter model supplied by `--llm-model`, `OPENROUTER_MODEL`, or
+  programmatic config
 
-The current LLM provider implementation supports Anthropic only. The default
-model is `claude-sonnet-4-20250514`.
+The current LLM provider implementation supports OpenRouter only. There is no
+default model.
 
 ## Quick start
 
@@ -108,7 +110,8 @@ corepack enable
 corepack prepare pnpm@11.1.3 --activate
 pnpm install
 pnpm build
-export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENROUTER_API_KEY="sk-or-..."
+export OPENROUTER_MODEL="anthropic/claude-sonnet-4"
 node dist/cli.js catch --base origin/main --head HEAD
 ```
 
@@ -116,7 +119,8 @@ After installing or linking the package into another project, use the `jittest`
 binary:
 
 ```sh
-export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENROUTER_API_KEY="sk-or-..."
+export OPENROUTER_MODEL="anthropic/claude-sonnet-4"
 jittest catch --base origin/main --head HEAD
 ```
 
@@ -159,6 +163,9 @@ catch options
   --context-file <path>    Extra local context file for intent analysis
   --pr-title <text>        Pull request title for intent-aware analysis
   --pr-body <text>         Pull request body for intent-aware analysis
+  --llm-model <model>      OpenRouter model id
+  --max-cost-usd <number>  Run-level OpenRouter dollar budget
+  --max-tokens <number>    Run-level LLM token budget
   --cwd <path>             Repository root (default: .)
 ```
 
@@ -183,6 +190,9 @@ catch options
 | `--context-file` | none | May be repeated. File contents are passed to intent analysis. |
 | `--pr-title` | empty | Helps the intent-aware workflow decide what behavior was intended. |
 | `--pr-body` | empty | Helps the intent-aware workflow decide what behavior was intended. |
+| `--llm-model` | none | OpenRouter model id. If omitted, `OPENROUTER_MODEL` or `llm.model` must provide one. |
+| `--max-cost-usd` | none | Run-level dollar guardrail. Existing in-flight calls may finish and overshoot. |
+| `--max-tokens` | none | Run-level LLM token guardrail. This is separate from `llm.maxTokens`, the per-call output cap. |
 | `--cwd` | `.` | Repository root to analyze. |
 
 ## Examples
@@ -474,6 +484,32 @@ The top-level JSON shape is:
     "llmCallCount": 9,
     "estimatedTokens": 12000,
     "estimatedCost": 0.0123,
+    "llmUsage": {
+      "callCount": 9,
+      "totalInputTokens": 7000,
+      "totalOutputTokens": 5000,
+      "totalTokens": 12000,
+      "totalCostUsd": 0.0123,
+      "costKnown": true,
+      "byModel": [
+        {
+          "model": "anthropic/claude-sonnet-4",
+          "callCount": 9,
+          "inputTokens": 7000,
+          "outputTokens": 5000,
+          "totalTokens": 12000,
+          "costUsd": 0.0123,
+          "costKnown": true
+        }
+      ],
+      "budget": {
+        "status": "within-budget",
+        "skippedCalls": 0,
+        "overshootAllowed": true,
+        "dollarBudgetEnforced": true
+      },
+      "events": []
+    },
     "diffRiskScore": 0.42
   },
   "reports": [],
@@ -484,6 +520,11 @@ The top-level JSON shape is:
 
 When the run is skipped or no tests are generated, `stats` may be `null` and
 `statusMessage` explains why.
+
+When a run-level token or dollar budget is exhausted, already generated tests
+still execute and non-LLM assessment continues. Future LLM generation or judging
+is skipped, and `stats.llmUsage` records the budget event and skipped-call
+count.
 
 ### GitHub comment
 
@@ -506,11 +547,13 @@ Default runtime configuration:
 ```ts
 {
   llm: {
-    provider: "anthropic",
-    model: "claude-sonnet-4-20250514",
-    maxTokens: 4096
+    provider: "openrouter",
+    model: "anthropic/claude-sonnet-4", // required; no built-in default
+    maxTokens: 4096, // per-call output-token cap
+    providerOptions: {},
+    budget: {}
   },
-  judgeModels: ["claude-sonnet-4-20250514"],
+  judgeModels: [],
   riskThreshold: 0,
   testsPerFunction: 3,
   maxTotalTests: 50,
@@ -533,7 +576,8 @@ Default runtime configuration:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | Yes | API key used for test generation, risk inference, mutant generation, and LLM judging. |
+| `OPENROUTER_API_KEY` | Yes | API key used for test generation, risk inference, mutant generation, and LLM judging. |
+| `OPENROUTER_MODEL` | Yes unless `--llm-model` or programmatic `llm.model` is set | OpenRouter model id. |
 
 All other environment variables from the current process are inherited by the
 Vitest runs in the temporary worktrees.
@@ -734,7 +778,8 @@ jobs:
 
       - name: Run JiTTest
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: anthropic/claude-sonnet-4
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -765,12 +810,13 @@ see [Manual GitHub Action for a Pull Request](docs/manual-github-action-pr.md).
 
 ## Troubleshooting
 
-### `ANTHROPIC_API_KEY` is missing or invalid
+### `OPENROUTER_API_KEY` or model is missing or invalid
 
-Set a valid Anthropic API key before running the CLI:
+Set a valid OpenRouter API key and model before running the CLI:
 
 ```sh
-export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENROUTER_API_KEY="sk-or-..."
+export OPENROUTER_MODEL="anthropic/claude-sonnet-4"
 ```
 
 ### No files are analyzed
@@ -853,7 +899,7 @@ message. Use `--output json` if you always need a machine-readable artifact.
 ## Limitations
 
 - The CLI is currently focused on TypeScript and Vitest.
-- Only the Anthropic provider is implemented.
+- Only the OpenRouter provider is implemented.
 - There is no config-file loader yet; use CLI flags or programmatic overrides.
 - Generated tests may be invalid, flaky, or too specific. The assessor reduces
   this noise but cannot remove it completely.

@@ -1,6 +1,6 @@
 import type { AssessmentRecord } from "../assessors/types.js";
 
-import type { BehaviorReport } from "./types.js";
+import type { BehaviorReport, RunStats } from "./types.js";
 
 interface CatchResultSummary {
   baseRef: string;
@@ -17,6 +17,7 @@ interface CatchResultSummary {
   reportsGenerated?: number;
   duration?: string;
   estimatedCost?: number;
+  llmUsage?: RunStats["llmUsage"];
   statusMessage?: string;
   reports?: readonly BehaviorReport[];
 }
@@ -63,6 +64,19 @@ export const formatCatchResult = (summary: CatchResultSummary): string => {
 
   if (summary.estimatedCost !== undefined) {
     lines.push(`Cost: $${summary.estimatedCost.toFixed(4)}`);
+  }
+
+  if (summary.llmUsage?.budget.status === "exhausted") {
+    const reason = summary.llmUsage.budget.exhaustedReason ?? "tokens";
+    lines.push(
+      `LLM budget: exhausted (${reason}); skipped ${String(
+        summary.llmUsage.budget.skippedCalls,
+      )} future calls`,
+    );
+  }
+
+  if (summary.llmUsage && !summary.llmUsage.budget.dollarBudgetEnforced) {
+    lines.push("OpenRouter cost: unverified for at least one LLM call");
   }
 
   if (summary.statusMessage !== undefined) {

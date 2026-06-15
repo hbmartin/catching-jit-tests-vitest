@@ -87,7 +87,9 @@ const config = {
   reportThreshold: 0,
 } as JiTTestConfig;
 
-const llm = {} as LLMClient;
+const llm = {
+  isBudgetExhausted: vi.fn().mockReturnValue(false),
+} as unknown as LLMClient;
 
 const mockAssessors = (
   rubfake: Assessment | null,

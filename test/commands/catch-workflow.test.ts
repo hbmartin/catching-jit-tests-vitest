@@ -36,6 +36,7 @@ const makeOptions = (
   cwd: "/repo",
   prTitle: "Fix auth",
   prBody: "Preserve authorization behavior",
+  llmModel: "openai/gpt-4.1",
   ...overrides,
 });
 
@@ -158,6 +159,33 @@ const report: BehaviorReport = {
   },
 };
 
+const defaultLlmUsage = {
+  callCount: 2,
+  totalInputTokens: 10,
+  totalOutputTokens: 5,
+  totalTokens: 15,
+  totalCostUsd: 0.001,
+  costKnown: true,
+  byModel: [
+    {
+      model: "openai/gpt-4.1",
+      callCount: 2,
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+      costUsd: 0.001,
+      costKnown: true,
+    },
+  ],
+  budget: {
+    status: "within-budget" as const,
+    skippedCalls: 0,
+    overshootAllowed: true,
+    dollarBudgetEnforced: true,
+  },
+  events: [],
+};
+
 const mockCatchDependencies = (riskScore = 0.8) => {
   const diffWithoutRisk = makeDiff(0);
   const diffWithRisk = makeDiff(riskScore);
@@ -166,8 +194,12 @@ const mockCatchDependencies = (riskScore = 0.8) => {
     callCount: 2,
     totalInputTokens: 10,
     totalOutputTokens: 5,
+    totalTokens: 15,
     estimatedCost: 0.001,
+    llmUsage: defaultLlmUsage,
   });
+  const isBudgetExhaustedMock = vi.fn().mockReturnValue(false);
+  const getBudgetStatusMessageMock = vi.fn().mockReturnValue(undefined);
 
   const mocks = {
     extractDiffContextMock: vi.fn().mockResolvedValue(diffWithoutRisk),
@@ -201,9 +233,13 @@ const mockCatchDependencies = (riskScore = 0.8) => {
     LLMClientMock: vi.fn(function LLMClientMock() {
       return {
         getStats: getStatsMock,
+        isBudgetExhausted: isBudgetExhaustedMock,
+        getBudgetStatusMessage: getBudgetStatusMessageMock,
       };
     }),
     getStatsMock,
+    isBudgetExhaustedMock,
+    getBudgetStatusMessageMock,
     logger: {
       info: vi.fn(),
       warn: vi.fn(),
@@ -288,7 +324,10 @@ describe("createCatchCommandResult", () => {
 
     expect(result).toMatchObject({
       eligibleForGeneration: true,
-      stats: null,
+      stats: {
+        totalTestsGenerated: 0,
+        llmUsage: defaultLlmUsage,
+      },
       statusMessage: "No tests were generated for the current diff.",
     });
     expect(mocks.dodgyDiffWorkflowMock).toHaveBeenCalled();
@@ -380,8 +419,60 @@ describe("createCatchCommandResult", () => {
       llmCallCount: 2,
       estimatedTokens: 15,
       estimatedCost: 0.001,
+      llmUsage: defaultLlmUsage,
       diffRiskScore: 0.95,
     });
+  });
+
+  it("continues execution and non-LLM assessment after budget exhaustion", async () => {
+    const mocks = mockCatchDependencies(0.95);
+    const dodgyTest = makeGeneratedTest(
+      "dodgy-diff",
+      "test/dodgy.jittest.test.ts",
+    );
+    const exhaustedUsage = {
+      ...defaultLlmUsage,
+      budget: {
+        status: "exhausted" as const,
+        exhaustedReason: "tokens" as const,
+        skippedCalls: 1,
+        overshootAllowed: true,
+        dollarBudgetEnforced: true,
+      },
+    };
+    mocks.getStatsMock.mockReturnValue({
+      callCount: 2,
+      totalInputTokens: 10,
+      totalOutputTokens: 5,
+      totalTokens: 15,
+      estimatedCost: 0.001,
+      llmUsage: exhaustedUsage,
+    });
+    mocks.isBudgetExhaustedMock.mockReturnValue(true);
+    mocks.getBudgetStatusMessageMock.mockReturnValue(
+      "LLM token budget was exhausted; future LLM calls were skipped.",
+    );
+    mocks.dodgyDiffWorkflowMock.mockResolvedValue([dodgyTest]);
+    mocks.dualExecutionMock.mockResolvedValue([
+      makeDualResult(dodgyTest, "failed"),
+    ]);
+
+    const { createCatchCommandResult } = await import(
+      "../../source/commands/catch.js"
+    );
+    const result = await createCatchCommandResult(makeOptions());
+
+    expect(mocks.intentAwareWorkflowMock).not.toHaveBeenCalled();
+    expect(mocks.dualExecutionMock).toHaveBeenCalled();
+    expect(mocks.assessWeakCatchMock).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.any(Object),
+      expect.any(String),
+      expect.any(Object),
+      expect.objectContaining({ llmJudgeEnabled: false }),
+    );
+    expect(result.statusMessage).toContain("LLM token budget was exhausted");
+    expect(result.stats?.llmUsage.budget.status).toBe("exhausted");
   });
 });
 

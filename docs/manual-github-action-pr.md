@@ -15,7 +15,7 @@ the GitHub lookup and passes those refs to `jittest catch`.
 - A GitHub repository that uses Vitest.
 - Node.js `>=22` in the workflow.
 - The project can install dependencies with pnpm.
-- The repository has an `ANTHROPIC_API_KEY` Actions secret.
+- The repository has an `OPENROUTER_API_KEY` Actions secret.
 - `catching-jit-tests-vitest` is installed in the project.
 
 Install the package in the repository that will run the workflow:
@@ -30,12 +30,12 @@ the workflow. For example, replace `pnpm install --frozen-lockfile` and
 
 ## Add the API key
 
-Add an Actions secret named `ANTHROPIC_API_KEY`:
+Add an Actions secret named `OPENROUTER_API_KEY`:
 
 1. Open the repository on GitHub.
 2. Go to **Settings** > **Secrets and variables** > **Actions**.
-3. Create a repository secret named `ANTHROPIC_API_KEY`.
-4. Store the Anthropic API key used by `jittest`.
+3. Create a repository secret named `OPENROUTER_API_KEY`.
+4. Store the OpenRouter API key used by `jittest`.
 
 ## Add the workflow
 
@@ -108,7 +108,8 @@ jobs:
 
       - name: Run JiTTest
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: anthropic/claude-sonnet-4
         run: |
           pnpm exec jittest catch \
             --base "origin/${BASE_REF}" \
@@ -143,7 +144,7 @@ status message, `jittest-comment.md` stays empty and no comment is posted.
 ## Security
 
 This workflow fetches and executes pull request code while
-`ANTHROPIC_API_KEY` is available in the job environment. The CLI also installs
+`OPENROUTER_API_KEY` is available in the job environment. The CLI also installs
 dependencies in temporary worktrees and runs generated Vitest tests there. Run
 this workflow only for trusted pull requests, or protect the job with a GitHub
 Environment that requires maintainer approval before secrets are exposed.

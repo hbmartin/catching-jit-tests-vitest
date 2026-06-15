@@ -91,7 +91,7 @@ async function assessWeakCatch(
   }
 
   let llmEnsembleResult: Assessment | null = null;
-  if (config.llmJudgeEnabled) {
+  if (config.llmJudgeEnabled && !llm.isBudgetExhausted()) {
     llmEnsembleResult = await ensembleJudge(
       {
         testCode: weakCatch.test.code,

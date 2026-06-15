@@ -9,7 +9,8 @@
   },
   "author": "Harold Martin <harold.martin@gmail.com>",
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.96.0",
+    "@openrouter/ai-sdk-provider": "^2.9.1",
+    "ai": "^6.0.206",
     "picomatch": "^4.0.4",
     "zod": "^4.4.3"
   },

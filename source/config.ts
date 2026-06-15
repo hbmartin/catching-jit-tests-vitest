@@ -28,12 +28,23 @@ const booleanOptionSchema = z.preprocess((value) => {
 
 const jitTestConfigSchema = z.object({
   llm: z.object({
-    provider: z.enum(["anthropic"]).default("anthropic"),
-    model: z.string().default("claude-sonnet-4-20250514"),
-    apiKey: z.string(),
-    maxTokens: z.number().default(4096),
+    provider: z.literal("openrouter").default("openrouter"),
+    model: z.string().trim().min(1),
+    apiKey: z.string().default(""),
+    maxTokens: z.number().int().positive().default(4096),
+    providerOptions: z
+      .object({
+        openrouter: z.record(z.string(), z.unknown()).optional(),
+      })
+      .default({}),
+    budget: z
+      .object({
+        maxCostUsd: z.number().positive().optional(),
+        maxTokens: z.number().int().positive().optional(),
+      })
+      .default({}),
   }),
-  judgeModels: z.array(z.string()).default(["claude-sonnet-4-20250514"]),
+  judgeModels: z.array(z.string()).default([]),
   riskThreshold: z.number().min(0).max(1).default(0),
   testsPerFunction: z.number().min(1).default(3),
   maxTotalTests: z.number().min(1).default(50),
@@ -69,6 +80,9 @@ const catchCommandOptionsSchema = z.object({
   reportThreshold: z.coerce.number().min(-1).max(1).default(0),
   feedbackPath: z.string().default(".jittest/assessment-records.jsonl"),
   contextFiles: z.array(z.string()).default([]),
+  llmModel: z.string().trim().min(1).optional(),
+  maxCostUsd: z.coerce.number().positive().optional(),
+  maxTokens: z.coerce.number().int().positive().optional(),
   include: stringListSchema.default(defaultIncludePatterns),
   exclude: stringListSchema.default(defaultExcludePatterns),
   cwd: z.string().trim().min(1).default("."),
@@ -80,13 +94,19 @@ type CatchCommandOptions = z.infer<typeof catchCommandOptionsSchema>;
 
 function getApiKey(): string {
   // biome-ignore lint/complexity/useLiteralKeys: env var access requires bracket notation
-  return process.env["ANTHROPIC_API_KEY"] ?? "";
+  return process.env["OPENROUTER_API_KEY"] ?? "";
+}
+
+function getModel(): string {
+  // biome-ignore lint/complexity/useLiteralKeys: env var access requires bracket notation
+  return process.env["OPENROUTER_MODEL"] ?? "";
 }
 
 function createDefaultConfig(): JiTTestConfig {
   return jitTestConfigSchema.parse({
     llm: {
       apiKey: getApiKey(),
+      model: getModel(),
     },
   });
 }
@@ -99,6 +119,7 @@ function loadConfig(overrides: Record<string, unknown> = {}): JiTTestConfig {
     ...restOverrides,
     llm: {
       apiKey: getApiKey(),
+      model: getModel(),
       ...llmOverrides,
     },
   };

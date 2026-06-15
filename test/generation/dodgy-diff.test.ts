@@ -15,6 +15,7 @@ const makeLLM = (): LLMClient =>
         outputTokens: 1,
       },
     }),
+    isBudgetExhausted: vi.fn().mockReturnValue(false),
   }) as unknown as LLMClient;
 
 const diff: DiffContext = {

@@ -2,7 +2,10 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { killMutantPrompt } from "../prompts/templates.js";
 import { generatedTestSchema } from "../runtime-schemas.js";
-import type { LLMClient } from "../utils/llm-client.js";
+import {
+  isLLMBudgetExhaustedError,
+  type LLMClient,
+} from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
 import type { GeneratedTest, TestSynthesisRequest } from "./types.js";
@@ -206,6 +209,11 @@ async function synthesizeTest(
       generatorConfidence: 0.7,
     });
   } catch (err) {
+    if (isLLMBudgetExhaustedError(err)) {
+      logger.warn("Test synthesis skipped: LLM budget exhausted");
+      return null;
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`Test synthesis failed: ${message}`);
     return null;
@@ -220,6 +228,11 @@ async function synthesizeMultipleTests(
   const results: GeneratedTest[] = [];
 
   for (let i = 0; i < count; i += 1) {
+    if (llm.isBudgetExhausted()) {
+      logger.warn("Skipping remaining test synthesis: LLM budget exhausted");
+      break;
+    }
+
     const test = await synthesizeTest(
       {
         ...request,

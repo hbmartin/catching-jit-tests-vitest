@@ -2,3 +2,5 @@ minimumReleaseAge: 1440
 minimumReleaseAgeStrict: false
 minimumReleaseAgeExclude:
   - baseline-browser-mapping
+  - '@ai-sdk/gateway@3.0.132'
+  - ai@6.0.206

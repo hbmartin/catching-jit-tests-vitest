@@ -35,6 +35,9 @@ catch options
   --context-file <path>    Extra local context file for intent analysis
   --pr-title <text>        Pull request title for intent-aware analysis
   --pr-body <text>         Pull request body for intent-aware analysis
+  --llm-model <model>      OpenRouter model id
+  --max-cost-usd <number>  Run-level OpenRouter dollar budget
+  --max-tokens <number>    Run-level LLM token budget
   --cwd <path>             Repository root (default: .)
 `;
 
@@ -75,6 +78,9 @@ const parseCatchOptions = (argv: readonly string[]) => {
       "context-file": { type: "string", multiple: true },
       "pr-title": { type: "string" },
       "pr-body": { type: "string" },
+      "llm-model": { type: "string" },
+      "max-cost-usd": { type: "string" },
+      "max-tokens": { type: "string" },
       cwd: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
@@ -104,6 +110,9 @@ const parseCatchOptions = (argv: readonly string[]) => {
     contextFiles: parsed.values["context-file"],
     prTitle: parsed.values["pr-title"],
     prBody: parsed.values["pr-body"],
+    llmModel: parsed.values["llm-model"],
+    maxCostUsd: parsed.values["max-cost-usd"],
+    maxTokens: parsed.values["max-tokens"],
     cwd: parsed.values.cwd,
   });
 };

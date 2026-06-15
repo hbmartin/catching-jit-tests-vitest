@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   createDefaultConfig,
@@ -7,10 +7,36 @@ import {
 } from "../source/config.js";
 
 describe("createDefaultConfig", () => {
+  const originalApiKey = process.env.OPENROUTER_API_KEY;
+  const originalModel = process.env.OPENROUTER_MODEL;
+
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.OPENROUTER_MODEL = "anthropic/claude-sonnet-4";
+  });
+
+  afterEach(() => {
+    if (originalApiKey === undefined) {
+      delete process.env.OPENROUTER_API_KEY;
+    } else {
+      process.env.OPENROUTER_API_KEY = originalApiKey;
+    }
+
+    if (originalModel === undefined) {
+      delete process.env.OPENROUTER_MODEL;
+    } else {
+      process.env.OPENROUTER_MODEL = originalModel;
+    }
+  });
+
   it("creates config with default values", () => {
     const config = createDefaultConfig();
-    expect(config.llm.provider).toBe("anthropic");
-    expect(config.llm.model).toBe("claude-sonnet-4-20250514");
+    expect(config.llm.provider).toBe("openrouter");
+    expect(config.llm.model).toBe("anthropic/claude-sonnet-4");
+    expect(config.llm.apiKey).toBe("test-openrouter-key");
+    expect(config.llm.providerOptions).toEqual({});
+    expect(config.llm.budget).toEqual({});
+    expect(config.judgeModels).toEqual([]);
     expect(config.testsPerFunction).toBe(3);
     expect(config.maxTotalTests).toBe(50);
     expect(config.workflow).toBe("both");
@@ -28,18 +54,35 @@ describe("createDefaultConfig", () => {
       "**/node_modules/**",
     ]);
   });
+
+  it("requires an OpenRouter model", () => {
+    delete process.env.OPENROUTER_MODEL;
+
+    expect(() => createDefaultConfig()).toThrow();
+  });
 });
 
 describe("loadConfig", () => {
-  const originalApiKey = process.env.ANTHROPIC_API_KEY;
+  const originalApiKey = process.env.OPENROUTER_API_KEY;
+  const originalModel = process.env.OPENROUTER_MODEL;
+
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "test-api-key";
+    process.env.OPENROUTER_MODEL = "openai/gpt-4.1";
+  });
 
   afterEach(() => {
     if (originalApiKey === undefined) {
-      delete process.env.ANTHROPIC_API_KEY;
-      return;
+      delete process.env.OPENROUTER_API_KEY;
+    } else {
+      process.env.OPENROUTER_API_KEY = originalApiKey;
     }
 
-    process.env.ANTHROPIC_API_KEY = originalApiKey;
+    if (originalModel === undefined) {
+      delete process.env.OPENROUTER_MODEL;
+    } else {
+      process.env.OPENROUTER_MODEL = originalModel;
+    }
   });
 
   it("applies overrides to default config", () => {
@@ -62,16 +105,36 @@ describe("loadConfig", () => {
   });
 
   it("merges nested llm overrides without dropping the api key", () => {
-    process.env.ANTHROPIC_API_KEY = "test-api-key";
-
     const config = loadConfig({
       llm: {
         model: "custom-model",
+        providerOptions: {
+          openrouter: {
+            reasoning: { effort: "low" },
+          },
+        },
+        budget: {
+          maxCostUsd: 0.25,
+          maxTokens: 10_000,
+        },
       },
     });
 
     expect(config.llm.model).toBe("custom-model");
     expect(config.llm.apiKey).toBe("test-api-key");
+    expect(config.llm.providerOptions.openrouter).toEqual({
+      reasoning: { effort: "low" },
+    });
+    expect(config.llm.budget).toEqual({
+      maxCostUsd: 0.25,
+      maxTokens: 10_000,
+    });
+  });
+
+  it("uses OPENROUTER_MODEL when no programmatic model is supplied", () => {
+    process.env.OPENROUTER_MODEL = "meta-llama/llama-4";
+
+    expect(loadConfig().llm.model).toBe("meta-llama/llama-4");
   });
 });
 
@@ -104,6 +167,8 @@ describe("parseCatchCommandOptions", () => {
       batchSize: "4",
       timeout: "45000",
       reportThreshold: "-0.2",
+      maxCostUsd: "1.25",
+      maxTokens: "25000",
     });
 
     expect(options.riskThreshold).toBe(0.4);
@@ -112,6 +177,8 @@ describe("parseCatchCommandOptions", () => {
     expect(options.batchSize).toBe(4);
     expect(options.timeout).toBe(45_000);
     expect(options.reportThreshold).toBe(-0.2);
+    expect(options.maxCostUsd).toBe(1.25);
+    expect(options.maxTokens).toBe(25_000);
   });
 
   it("coerces boolean values", () => {
@@ -158,5 +225,13 @@ describe("parseCatchCommandOptions", () => {
 
     expect(options.include).toEqual(["packages/*/src/**/*.ts"]);
     expect(options.exclude).toEqual(["**/*.generated.ts"]);
+  });
+
+  it("accepts the OpenRouter model flag", () => {
+    const options = parseCatchCommandOptions({
+      llmModel: "anthropic/claude-sonnet-4",
+    });
+
+    expect(options.llmModel).toBe("anthropic/claude-sonnet-4");
   });
 });

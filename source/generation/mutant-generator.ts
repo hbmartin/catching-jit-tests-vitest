@@ -1,6 +1,9 @@
 import ts from "typescript";
 import { generateMutantPrompt } from "../prompts/templates.js";
-import type { LLMClient } from "../utils/llm-client.js";
+import {
+  isLLMBudgetExhaustedError,
+  type LLMClient,
+} from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 import { extractCodeBlock } from "./test-synthesizer.js";
 
@@ -42,6 +45,13 @@ async function generateRiskMutant(
   filePath: string,
   llm: LLMClient,
 ): Promise<MutantCandidate | null> {
+  if (llm.isBudgetExhausted()) {
+    logger.warn(
+      `Skipping mutant generation for risk ${risk.id}: LLM budget exhausted`,
+    );
+    return null;
+  }
+
   try {
     const prompt = generateMutantPrompt({
       parentSource,
@@ -77,6 +87,13 @@ async function generateRiskMutant(
       filePath,
     };
   } catch (err) {
+    if (isLLMBudgetExhaustedError(err)) {
+      logger.warn(
+        `Skipping mutant generation for risk ${risk.id}: LLM budget exhausted`,
+      );
+      return null;
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`Mutant generation failed for risk ${risk.id}: ${message}`);
     return null;

@@ -19,6 +19,13 @@ async function dodgyDiffWorkflow(
   const tests: GeneratedTest[] = [];
 
   for (const file of diff.files) {
+    if (llm.isBudgetExhausted()) {
+      logger.warn(
+        "Skipping remaining dodgy-diff generation: LLM budget exhausted",
+      );
+      break;
+    }
+
     const { existingTests, projectContext } = await resolveProjectContext(
       repoRoot,
       diff,
@@ -26,6 +33,13 @@ async function dodgyDiffWorkflow(
     );
 
     for (const fn of file.changedFunctions) {
+      if (llm.isBudgetExhausted()) {
+        logger.warn(
+          "Skipping remaining dodgy-diff functions: LLM budget exhausted",
+        );
+        break;
+      }
+
       logger.info(`Generating dodgy-diff tests for ${fn.name} in ${file.path}`);
 
       const candidates = await synthesizeMultipleTests(

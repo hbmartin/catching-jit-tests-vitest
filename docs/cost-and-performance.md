@@ -15,8 +15,8 @@ For each `jittest catch` run, the LLM is invoked roughly as:
 - 1× per weak catch for the LLM judge ensemble (one call per configured
   judge model)
 
-In practice, on a default config (`workflow=both`, `testsPerFunction=3`,
-`judgeModels=[claude-sonnet-4-...]`):
+In practice, on a typical config (`workflow=both`, `testsPerFunction=3`,
+`judgeModels=[]`, with judging falling back to `config.llm.model`):
 
 | Diff shape | LLM calls per PR | Typical cost (USD) |
 | --- | --- | --- |
@@ -26,9 +26,9 @@ In practice, on a default config (`workflow=both`, `testsPerFunction=3`,
 | Monorepo bulk change, 30+ files | 50+ | $0.50+ |
 
 These are *rough* numbers from default flags; your mileage will vary
-heavily with prompt size (large diffs ➜ larger prompts) and the model in
-`config.llm.model`. The CLI reports `estimatedCost` in JSON output — log
-that to track real numbers.
+heavily with prompt size (large diffs ➜ larger prompts) and the OpenRouter
+model in `config.llm.model`. The CLI reports `estimatedCost` in JSON output
+and writes detailed accounting to `stats.llmUsage`.
 
 ## Where the time goes
 
@@ -79,12 +79,28 @@ configure additional judges via `loadConfig({ judgeModels: [...] })`,
 each adds one LLM call per weak catch. Stick with one unless you've
 measured an accuracy gain.
 
-### 6. Model choice
+### 6. Run-level budgets
 
-`config.llm.model` defaults to `claude-sonnet-4-20250514`. Substituting a
-cheaper Haiku model for generation cuts cost by ~5× per call but
-produces lower-quality tests. We do not recommend it for production
-without thorough A/B testing on your own feedback records.
+Use `--max-cost-usd` or `--max-tokens` as run-level guardrails:
+
+```sh
+jittest catch --max-cost-usd 0.25 --max-tokens 50000
+```
+
+These are not exact hard ceilings. Calls already in flight may finish and
+overshoot, but once the ledger sees the cap exceeded, future LLM generation and
+judging are skipped. Already generated tests still execute, and non-LLM
+assessment such as RubFake still runs.
+
+If OpenRouter omits cost metadata for a call, `jittest` continues enforcing the
+token budget and marks dollar enforcement as unverified in `stats.llmUsage`.
+
+### 7. Model choice
+
+There is no default model. Set `--llm-model`, `OPENROUTER_MODEL`, or
+programmatic `llm.model`. Cheaper models can cut cost substantially but often
+produce lower-quality tests. Do not switch production models without A/B
+testing on your own feedback records.
 
 ## Time knobs
 
@@ -156,14 +172,15 @@ pnpm in particular benefits a lot from a warm content-addressed store.
 
 ## Measuring real cost
 
-Every run emits `stats.estimatedCost` (USD) and `stats.estimatedTokens`
-in JSON output. The simplest dashboard is to append these to a CSV per
-PR:
+Every run emits compatibility fields `stats.estimatedCost` (USD),
+`stats.estimatedTokens`, and `stats.llmCallCount`, plus detailed
+`stats.llmUsage`. The simplest dashboard is to append these to a CSV per PR:
 
 ```sh
 jittest catch ... --output json > report.json
 jq -r '[.stats.estimatedCost, .stats.estimatedTokens,
-        .stats.llmCallCount, .stats.duration] | @csv' report.json \
+        .stats.llmUsage.costKnown, .stats.llmCallCount,
+        .stats.duration] | @csv' report.json \
   >> jittest-cost-log.csv
 ```
 

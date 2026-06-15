@@ -28,7 +28,7 @@ back here.
    weak catch report. Includes a verdict cheat-sheet, dismissal heuristics,
    and how to feed `assessment-records.jsonl` back into threshold tuning.
 6. [`security.md`](./security.md) — what data leaves the box, how to handle
-   the Anthropic API key, what to do for code that must not be sent to a
+   the OpenRouter API key, what to do for code that must not be sent to a
    third-party LLM, and supply-chain considerations for the temporary
    worktrees.
 7. [`troubleshooting.md`](./troubleshooting.md) — production-specific

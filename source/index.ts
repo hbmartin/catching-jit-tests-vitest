@@ -75,6 +75,8 @@ export type {
 export type {
   AssessmentFeedbackRecord,
   EngineerFeedback,
+  LLMUsage,
+  LLMUsageAuditEvent,
 } from "./runtime-schemas.js";
 export {
   aggregatedAssessmentSchema,
@@ -89,6 +91,8 @@ export {
   inferRisksResponseSchema,
   inferredRiskSchema,
   judgeOutputSchema,
+  llmUsageAuditEventSchema,
+  llmUsageSchema,
   reportCommandResultSchema,
   runStatsSchema,
   testResultSchema,
