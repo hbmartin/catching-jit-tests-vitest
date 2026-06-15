@@ -36,6 +36,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsc --watch",
+    "dupes": "jscpd --config .jscpd.json --no-tips",
     "format": "biome check --write",
     "lint": "biome check --error-on-warnings",
     "publint": "publint --pack npm",
@@ -45,15 +46,16 @@
     "typecheck": "tsc --noEmit"
   },
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "devDependencies": {
-    "@biomejs/biome": "^2.4.15",
+    "@biomejs/biome": "^2.5.0",
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^22",
     "@types/picomatch": "^4.0.3",
-    "@vitest/coverage-istanbul": "^4.1.6",
+    "@vitest/coverage-istanbul": "^4.1.8",
+    "jscpd": "^5.0.9",
     "publint": "^0.3.21",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6"
+    "vitest": "^4.1.8"
   }
 }

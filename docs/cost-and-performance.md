@@ -102,6 +102,14 @@ programmatic `llm.model`. Cheaper models can cut cost substantially but often
 produce lower-quality tests. Do not switch production models without A/B
 testing on your own feedback records.
 
+Pick a model that supports structured outputs. Risk inference and the LLM judge
+request JSON-schema-constrained responses (the AI SDK runs in
+`compatibility: "strict"` mode), so a model without `response_format` /
+structured-output support will fail those calls. Such failures are caught and
+degrade gracefully — risk inference returns no risks and the judge returns a
+neutral verdict — but you lose that signal, so prefer a structured-output-capable
+model in production.
+
 ## Time knobs
 
 ### `--parallel-worktrees`

@@ -366,6 +366,52 @@ describe("LLMClient", () => {
     );
   });
 
+  it("stays silent about dollar enforcement when no cost budget is set", async () => {
+    const { provider } = makeProvider();
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "missing cost",
+        inputTokens: 7,
+        outputTokens: 6,
+      }),
+    );
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+    const client = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+
+    await client.complete({ prompt: "first" });
+
+    expect(client.getStats().llmUsage.costKnown).toBe(false);
+    expect(client.getBudgetStatusMessage()).toBeUndefined();
+  });
+
+  it("requires an API key on the real provider path", async () => {
+    const createOpenRouterMock = vi.fn();
+    vi.doMock("@openrouter/ai-sdk-provider", () => ({
+      createOpenRouter: createOpenRouterMock,
+    }));
+
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+
+    expect(
+      () =>
+        new LLMClient({
+          apiKey: "   ",
+          model: "openai/gpt-4.1",
+          maxTokens: 1,
+        }),
+    ).toThrow("An OpenRouter API key is required");
+    expect(createOpenRouterMock).not.toHaveBeenCalled();
+  });
+
   it("uses AI SDK token usage when OpenRouter metadata is absent", async () => {
     const { provider } = makeProvider();
     const generateTextMock = vi.fn().mockResolvedValue(
