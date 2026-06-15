@@ -166,6 +166,12 @@ function createProvider(config: LLMClientConfig): OpenRouterProvider {
     throw new Error(`Unsupported LLM provider: ${String(provider)}`);
   }
 
+  if (config.apiKey === undefined || config.apiKey.trim().length === 0) {
+    throw new Error(
+      "An OpenRouter API key is required. Set OPENROUTER_API_KEY.",
+    );
+  }
+
   return createOpenRouter({
     apiKey: config.apiKey,
     compatibility: "strict",
@@ -496,7 +502,7 @@ class LLMClient {
       return `LLM ${reason} budget was exhausted; future LLM calls were skipped and non-LLM work continued.`;
     }
 
-    if (!this.stats.costKnown) {
+    if (this.stats.budget.maxCostUsd !== undefined && !this.stats.costKnown) {
       return "OpenRouter cost metadata was missing for at least one LLM call; dollar budget enforcement is unverified.";
     }
 
