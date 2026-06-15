@@ -52,7 +52,10 @@ const makeLLM = (responses: Array<string | Error>): LLMClient => {
     };
   });
 
-  return { complete } as unknown as LLMClient;
+  return {
+    complete,
+    isBudgetExhausted: vi.fn().mockReturnValue(false),
+  } as unknown as LLMClient;
 };
 
 describe("shouldUseBoundedInlineDiff", () => {

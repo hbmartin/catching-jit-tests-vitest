@@ -7,8 +7,9 @@ implications.
 
 ## What is sent to the LLM provider
 
-The currently supported provider is **Anthropic only**, and the default
-model is the configured default in [`source/config.ts`](../source/config.ts).
+The currently supported provider is **OpenRouter only**. There is no default
+model; set `OPENROUTER_MODEL`, pass `--llm-model`, or provide `llm.model`
+programmatically.
 
 For each `jittest catch` run, the following data may be sent to the
 provider in prompt payloads:
@@ -66,13 +67,12 @@ Things that are **not** sent:
 
 ## API key handling
 
-- Store `ANTHROPIC_API_KEY` in a real secret manager — CI provider
+- Store `OPENROUTER_API_KEY` in a real secret manager — CI provider
   secrets, HashiCorp Vault, AWS Secrets Manager, 1Password, etc. Never
   commit it.
 - Pass it to the CLI only via environment variable. The CLI deliberately
   does not accept it as a flag for this reason.
-- Scope it. Anthropic's console supports separate keys per workspace
-  and per integration. Create one specifically for `jittest` so its
+- Scope it. Create one specifically for `jittest` so its
   usage and abuse surface are isolated. Rotate keys when teammates
   leave.
 - For GitHub PRs from forks, GitHub withholds secrets by default. Do
@@ -117,26 +117,25 @@ same retention and access controls you would to source code.
 
 ## Network egress
 
-The only `jittest`-owned API egress is outbound HTTPS to the Anthropic API
-(`api.anthropic.com`, currently). Git operations and package-manager installs
+The only `jittest`-owned API egress is outbound HTTPS to OpenRouter
+(`openrouter.ai`, currently). Git operations and package-manager installs
 may contact separate external endpoints, such as git remotes and npm/pnpm/yarn
 registries. Vitest execution itself is local unless the project's tests make
 network calls.
 
 In a hermetic environment (locked-down corporate VPN, etc.) you must
-allow outbound HTTPS to `api.anthropic.com`, plus any git or package-registry
-endpoints your runner needs. There is no way to point the Anthropic client at a
-different URL through the CLI; it would require patching
-`source/utils/llm-client.ts`.
+allow outbound HTTPS to OpenRouter, plus any git or package-registry endpoints
+your runner needs.
 
 ## Compliance posture
 
 If your organization needs an explicit statement for compliance review:
 
 - `jittest` is an LLM-augmented test generator that sends diff context,
-  changed source code, and (optionally) PR metadata to Anthropic's
-  hosted API.
-- Data sent is governed by your Anthropic API agreement and any DPA you
+  changed source code, and (optionally) PR metadata to OpenRouter and the
+  upstream model providers selected by your OpenRouter routing/model settings.
+- Data sent is governed by your OpenRouter and upstream provider agreements
+  and any DPA you
   have in place.
 - The `jittest` application sends no telemetry, analytics, or third-party
   requests beyond the configured LLM provider; dependency installation and git

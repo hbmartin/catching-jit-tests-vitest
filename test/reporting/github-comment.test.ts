@@ -27,6 +27,32 @@ const defaultStats: RunStats = {
   llmCallCount: 15,
   estimatedTokens: 50_000,
   estimatedCost: 0.25,
+  llmUsage: {
+    callCount: 15,
+    totalInputTokens: 25_000,
+    totalOutputTokens: 25_000,
+    totalTokens: 50_000,
+    totalCostUsd: 0.25,
+    costKnown: true,
+    byModel: [
+      {
+        model: "openai/gpt-4.1",
+        callCount: 15,
+        inputTokens: 25_000,
+        outputTokens: 25_000,
+        totalTokens: 50_000,
+        costUsd: 0.25,
+        costKnown: true,
+      },
+    ],
+    budget: {
+      status: "within-budget",
+      skippedCalls: 0,
+      overshootAllowed: true,
+      dollarBudgetEnforced: true,
+    },
+    events: [],
+  },
   diffRiskScore: 0.7,
 };
 
@@ -141,5 +167,47 @@ describe("formatPRComment", () => {
     expect(result).toContain("> &lt;script&gt;");
     expect(result).toContain("&lt;b&gt;before&lt;/b&gt;");
     expect(result).toContain("&lt;unsafe&gt; rationale");
+  });
+
+  it("mentions exhausted budgets and unverified dollar enforcement", () => {
+    const stats: RunStats = {
+      ...defaultStats,
+      llmUsage: {
+        ...defaultStats.llmUsage,
+        costKnown: false,
+        budget: {
+          ...defaultStats.llmUsage.budget,
+          status: "exhausted",
+          exhaustedReason: "tokens",
+          skippedCalls: 2,
+          dollarBudgetEnforced: false,
+        },
+      },
+    };
+
+    const result = formatPRComment(
+      [
+        {
+          headline: "Change",
+          senseCheck: "Expected?",
+          details: {
+            behaviorChange: {
+              summary: "",
+              parentBehavior: "",
+              childBehavior: "",
+              changeType: "other",
+            },
+            verdict: "uncertain",
+            assessorRationales: [],
+            testCode: "",
+            dismissalEstimate: "~5 minutes",
+          },
+        },
+      ],
+      stats,
+    );
+
+    expect(result).toContain("LLM budget exhausted (tokens)");
+    expect(result).toContain("dollar enforcement is unverified");
   });
 });

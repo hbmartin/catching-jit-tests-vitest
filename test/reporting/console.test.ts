@@ -79,6 +79,39 @@ describe("formatCatchResult", () => {
     expect(result).toContain("Reports generated: 1");
     expect(result).toContain("1. Unexpected behavior change detected");
   });
+
+  it("renders LLM budget status", () => {
+    const result = formatCatchResult({
+      baseRef: "origin/main",
+      headRef: "HEAD",
+      workflow: "both",
+      riskThreshold: 0,
+      eligibleForGeneration: true,
+      fileCount: 1,
+      riskScore: 0.8,
+      riskReasons: [],
+      llmUsage: {
+        callCount: 1,
+        totalInputTokens: 10,
+        totalOutputTokens: 5,
+        totalTokens: 15,
+        totalCostUsd: 0,
+        costKnown: false,
+        byModel: [],
+        budget: {
+          status: "exhausted",
+          exhaustedReason: "tokens",
+          skippedCalls: 3,
+          overshootAllowed: true,
+          dollarBudgetEnforced: false,
+        },
+        events: [],
+      },
+    });
+
+    expect(result).toContain("LLM budget: exhausted (tokens)");
+    expect(result).toContain("OpenRouter cost: unverified");
+  });
 });
 
 describe("formatAssessmentRecords", () => {

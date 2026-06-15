@@ -280,6 +280,72 @@ export const behaviorReportSchema = z.object({
 
 export type BehaviorReport = z.infer<typeof behaviorReportSchema>;
 
+export const llmUsageAuditEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("call"),
+    callNumber: z.number().int().positive(),
+    model: z.string(),
+    inputTokens: z.number().nonnegative(),
+    outputTokens: z.number().nonnegative(),
+    totalTokens: z.number().nonnegative(),
+    costUsd: z.number().nonnegative().optional(),
+    costKnown: z.boolean(),
+  }),
+  z.object({
+    type: z.literal("missing-cost"),
+    callNumber: z.number().int().positive(),
+    model: z.string(),
+  }),
+  z.object({
+    type: z.literal("budget-exhausted"),
+    callNumber: z.number().int().positive(),
+    model: z.string(),
+    reason: z.enum(["tokens", "cost"]),
+    limit: z.number().positive(),
+    totalTokens: z.number().nonnegative(),
+    totalCostUsd: z.number().nonnegative(),
+  }),
+  z.object({
+    type: z.literal("llm-skipped"),
+    model: z.string(),
+    reason: z.literal("budget-exhausted"),
+  }),
+]);
+
+export type LLMUsageAuditEvent = z.infer<typeof llmUsageAuditEventSchema>;
+
+export const llmUsageSchema = z.object({
+  callCount: z.number().nonnegative(),
+  totalInputTokens: z.number().nonnegative(),
+  totalOutputTokens: z.number().nonnegative(),
+  totalTokens: z.number().nonnegative(),
+  totalCostUsd: z.number().nonnegative(),
+  costKnown: z.boolean(),
+  byModel: z.array(
+    z.object({
+      model: z.string(),
+      callCount: z.number().nonnegative(),
+      inputTokens: z.number().nonnegative(),
+      outputTokens: z.number().nonnegative(),
+      totalTokens: z.number().nonnegative(),
+      costUsd: z.number().nonnegative(),
+      costKnown: z.boolean(),
+    }),
+  ),
+  budget: z.object({
+    maxCostUsd: z.number().positive().optional(),
+    maxTokens: z.number().int().positive().optional(),
+    status: z.enum(["within-budget", "exhausted"]),
+    exhaustedReason: z.enum(["tokens", "cost"]).optional(),
+    skippedCalls: z.number().nonnegative(),
+    overshootAllowed: z.boolean(),
+    dollarBudgetEnforced: z.boolean(),
+  }),
+  events: z.array(llmUsageAuditEventSchema),
+});
+
+export type LLMUsage = z.infer<typeof llmUsageSchema>;
+
 export const runStatsSchema = z.object({
   duration: z.string(),
   diffExtractionMs: z.number().nonnegative(),
@@ -312,6 +378,7 @@ export const runStatsSchema = z.object({
   llmCallCount: z.number().nonnegative(),
   estimatedTokens: z.number().nonnegative(),
   estimatedCost: z.number().nonnegative(),
+  llmUsage: llmUsageSchema,
   diffRiskScore: z.number().min(0).max(1),
 });
 

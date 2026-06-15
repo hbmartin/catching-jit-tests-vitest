@@ -1,7 +1,10 @@
 import type { JiTTestConfig } from "../config.js";
 import { judgeCatchPrompt } from "../prompts/templates.js";
 import { judgeOutputSchema } from "../runtime-schemas.js";
-import type { LLMClient } from "../utils/llm-client.js";
+import {
+  isLLMBudgetExhaustedError,
+  type LLMClient,
+} from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
 import type { Assessment, JudgeInput, JudgeOutput } from "./types.js";
@@ -32,6 +35,15 @@ async function singleModelJudge(
       judgeOutputSchema,
     );
   } catch (err) {
+    if (isLLMBudgetExhaustedError(err)) {
+      logger.warn("LLM judge skipped: LLM budget exhausted");
+      return {
+        unexpectedLikelihood: "medium",
+        explanation:
+          "LLM judge skipped because the run-level LLM budget was exhausted",
+      };
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`LLM judge failed: ${message}`);
     return {
@@ -75,6 +87,16 @@ async function ensembleJudge(
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<Assessment> {
+  if (llm.isBudgetExhausted()) {
+    return {
+      score: 0,
+      rationale:
+        "LLM judge skipped because the run-level LLM budget was exhausted",
+      detectedPatterns: [],
+      assessor: "llm-ensemble",
+    };
+  }
+
   const models =
     config.judgeModels.length > 0 ? config.judgeModels : [config.llm.model];
   const judgments = await Promise.all(

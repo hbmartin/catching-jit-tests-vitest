@@ -159,22 +159,20 @@ find "${TMPDIR:-/tmp}" -maxdepth 1 -type d -name 'jittest-*' \
 Run this on self-hosted runners daily. Ephemeral runners reclaim the
 disk on shutdown so this is moot.
 
-## "Anthropic rate limits are hitting"
+## "OpenRouter rate limits are hitting"
 
 If you see `429` or token-bucket errors:
 
 - Add `concurrency: cancel-in-progress: true` to your workflow so
   rapid pushes don't fan out parallel runs.
-- Stagger runs across multiple workspace-scoped API keys if you have
-  multiple repos.
+- Stagger runs across multiple OpenRouter API keys if you have multiple repos.
 - Reduce `--tests-per-function` and `--max-total-tests` to cut the
   call rate per run.
-- Contact Anthropic support to raise the workspace's rate limits.
+- Check OpenRouter and upstream-provider rate limits for the selected model.
 
-The Anthropic SDK retries retryable errors, including 429s, up to its default
-`maxRetries=2` with exponential backoff. If those retries are exhausted,
-`jittest` surfaces the final error and exits non-zero. Treat that as an alert,
-not as something to silently retry forever.
+The AI SDK retries retryable errors according to its configured retry behavior.
+If those retries are exhausted, `jittest` surfaces the final error and exits
+non-zero. Treat that as an alert, not as something to silently retry forever.
 
 ## "I changed the source but the result didn't change"
 
@@ -191,7 +189,7 @@ When filing an issue, please include:
 
 - The `jittest --version` output.
 - The full `stats` object from a `--output json` run.
-- The flags you ran with (excluding `ANTHROPIC_API_KEY`).
+- The flags you ran with (excluding `OPENROUTER_API_KEY`).
 - For false-positive reports: the relevant entries from
   `assessment-records.jsonl`. These contain everything the team
   needs to reproduce the verdict.

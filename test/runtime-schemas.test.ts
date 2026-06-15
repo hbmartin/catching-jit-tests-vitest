@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assessmentBundleSchema,
   reportCommandResultSchema,
+  runStatsSchema,
   testResultSchema,
   vitestJsonOutputSchema,
   weakCatchBundleSchema,
@@ -154,5 +155,97 @@ describe("runtime schemas", () => {
         },
       ],
     });
+  });
+
+  it("parses run stats with detailed LLM usage", () => {
+    const stats = {
+      duration: "5s",
+      diffExtractionMs: 10,
+      testGenerationMs: 20,
+      executionMs: 30,
+      assessmentMs: 40,
+      filesAnalyzed: 1,
+      functionsAnalyzed: 1,
+      totalTestsGenerated: 1,
+      testsPassedOnParent: 1,
+      testsFailedOnChild: 1,
+      weakCatchCount: 1,
+      hardeningCandidateCount: 0,
+      assessedAsTP: 1,
+      assessedAsFP: 0,
+      assessedAsUncertain: 0,
+      reportsGenerated: 1,
+      byWorkflow: {
+        dodgyDiff: {
+          generated: 1,
+          weakCatches: 1,
+          hardeningCandidates: 0,
+        },
+        intentAware: {
+          generated: 0,
+          weakCatches: 0,
+          hardeningCandidates: 0,
+        },
+      },
+      llmCallCount: 1,
+      estimatedTokens: 15,
+      estimatedCost: 0.001,
+      llmUsage: {
+        callCount: 1,
+        totalInputTokens: 10,
+        totalOutputTokens: 5,
+        totalTokens: 15,
+        totalCostUsd: 0.001,
+        costKnown: true,
+        byModel: [
+          {
+            model: "openai/gpt-4.1",
+            callCount: 1,
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+            costUsd: 0.001,
+            costKnown: true,
+          },
+        ],
+        budget: {
+          maxTokens: 10,
+          status: "exhausted",
+          exhaustedReason: "tokens",
+          skippedCalls: 1,
+          overshootAllowed: true,
+          dollarBudgetEnforced: true,
+        },
+        events: [
+          {
+            type: "call",
+            callNumber: 1,
+            model: "openai/gpt-4.1",
+            inputTokens: 10,
+            outputTokens: 5,
+            totalTokens: 15,
+            costUsd: 0.001,
+            costKnown: true,
+          },
+          {
+            type: "budget-exhausted",
+            callNumber: 1,
+            model: "openai/gpt-4.1",
+            reason: "tokens",
+            limit: 10,
+            totalTokens: 15,
+            totalCostUsd: 0.001,
+          },
+          {
+            type: "llm-skipped",
+            model: "openai/gpt-4.1",
+            reason: "budget-exhausted",
+          },
+        ],
+      },
+      diffRiskScore: 0.7,
+    };
+
+    expect(runStatsSchema.parse(stats)).toEqual(stats);
   });
 });

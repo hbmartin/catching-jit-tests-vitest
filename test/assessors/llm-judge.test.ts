@@ -18,6 +18,7 @@ function makeLLMClient(responses: Record<string, JudgeResponse>): LLMClient {
     return {
       completeJson,
       withModel: (nextModel: string) => createClient(nextModel),
+      isBudgetExhausted: vi.fn().mockReturnValue(false),
     } as unknown as LLMClient;
   };
 

@@ -16,9 +16,11 @@ CLI once locally and seen output.
   falls back to `npm`.
 - The target project must use Vitest. If the package can't run
   `vitest run`, no generated test will ever execute.
-- An `ANTHROPIC_API_KEY` with budget. Required for *all* runs — even
+- An `OPENROUTER_API_KEY` with budget. Required for *all* runs — even
   `dodgy-diff` only — because risk inference, generation, and the LLM judge
   ensemble all call the API.
+- An OpenRouter model supplied by `OPENROUTER_MODEL`, `--llm-model`, or
+  programmatic `llm.model`.
 
 ## Install path 1: as a dependency in the target repo
 
@@ -65,7 +67,8 @@ Before you turn on PR comments for the whole team, do a dry run on a
 non-trivial branch:
 
 ```sh
-export ANTHROPIC_API_KEY="sk-ant-..."
+export OPENROUTER_API_KEY="sk-or-..."
+export OPENROUTER_MODEL="anthropic/claude-sonnet-4"
 jittest catch --base origin/main --head HEAD --output json > /tmp/jittest.json
 jq '.stats' /tmp/jittest.json
 ```

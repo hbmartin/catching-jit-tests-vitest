@@ -38,9 +38,10 @@ and failure modes — that the root readme's CI example glosses over.
        version: 11.1.3
    ```
 
-3. **`ANTHROPIC_API_KEY` as a secret.** Never hard-code it in workflow
-   YAML. Use `secrets.ANTHROPIC_API_KEY` (or your provider's equivalent)
-   and pass it as an `env:` entry. See [`security.md`](./security.md).
+3. **`OPENROUTER_API_KEY` as a secret.** Never hard-code it in workflow
+   YAML. Use `secrets.OPENROUTER_API_KEY` and pass it as an `env:` entry.
+   Set `OPENROUTER_MODEL` or pass `--llm-model`. See
+   [`security.md`](./security.md).
 
 4. **Permissions to comment** if you want PR comments posted:
 
@@ -92,7 +93,8 @@ jobs:
 
       - name: Run jittest
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          OPENROUTER_MODEL: anthropic/claude-sonnet-4
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
@@ -218,7 +220,7 @@ just emits Markdown. For GitLab, Buildkite, Jenkins, etc.:
   [`cost-and-performance.md`](./cost-and-performance.md) for mitigation —
   most teams set `--parallel-worktrees true` (the default) and accept the
   cost, or scope `--cwd` to a single package.
-- **`ANTHROPIC_API_KEY` empty in PRs from forks.** GitHub Actions
+- **`OPENROUTER_API_KEY` empty in PRs from forks.** GitHub Actions
   withholds secrets from forked-PR workflows by default. Use
   `pull_request_target` with care, or run `jittest` only on PRs from the
   same repository (`if: github.event.pull_request.head.repo.full_name == github.repository`).

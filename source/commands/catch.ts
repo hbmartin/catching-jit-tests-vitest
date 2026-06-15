@@ -69,7 +69,25 @@ const createCommandConfig = (options: CatchCommandOptions) =>
     contextFiles: options.contextFiles,
     include: options.include,
     exclude: options.exclude,
+    llm: {
+      ...(options.llmModel === undefined ? {} : { model: options.llmModel }),
+      budget: {
+        maxCostUsd: options.maxCostUsd,
+        maxTokens: options.maxTokens,
+      },
+    },
   });
+
+const combineStatusMessages = (
+  ...messages: readonly (string | undefined)[]
+): string | undefined => {
+  const present = messages.filter(
+    (message): message is string =>
+      message !== undefined && message.trim().length > 0,
+  );
+
+  return present.length === 0 ? undefined : present.join(" ");
+};
 
 const createResult = (
   options: CatchCommandOptions,
@@ -142,7 +160,10 @@ const generateTests = async (
     allTests.push(...(await dodgyDiffWorkflow(diff, repoRoot, llm, config)));
   }
 
-  if (config.workflow === "intent-aware" || config.workflow === "both") {
+  if (
+    (config.workflow === "intent-aware" || config.workflow === "both") &&
+    !llm.isBudgetExhausted()
+  ) {
     allTests.push(...(await intentAwareWorkflow(diff, repoRoot, llm, config)));
   }
 
@@ -223,9 +244,9 @@ const buildRunStats = (input: {
       },
     },
     llmCallCount: input.llmStats.callCount,
-    estimatedTokens:
-      input.llmStats.totalInputTokens + input.llmStats.totalOutputTokens,
+    estimatedTokens: input.llmStats.totalTokens,
     estimatedCost: input.llmStats.estimatedCost,
+    llmUsage: input.llmStats.llmUsage,
     diffRiskScore: input.diff.riskScore,
   });
 
@@ -361,6 +382,9 @@ const assessWeakCatches = async (input: {
 
   for (const weakCatch of input.weakCatches) {
     const recordedAt = new Date().toISOString();
+    const assessmentConfig = input.llm.isBudgetExhausted()
+      ? { ...input.config, llmJudgeEnabled: false }
+      : input.config;
     const assessment = await assessWeakCatch(
       weakCatch,
       input.diff,
@@ -369,7 +393,7 @@ const assessWeakCatches = async (input: {
         weakCatch.childResult.failureMessage,
       ),
       input.llm,
-      input.config,
+      assessmentConfig,
     );
     await recordAssessmentFeedback({
       options: input.options,
@@ -462,6 +486,8 @@ const createNoTestsResult = (
   options: CatchCommandOptions,
   config: ReturnType<typeof createCommandConfig>,
   diff: DiffContext,
+  stats: RunStats | null,
+  statusMessage?: string,
 ): CatchCommandResult =>
   createResult(
     options,
@@ -471,9 +497,35 @@ const createNoTestsResult = (
     true,
     [],
     [],
-    null,
-    "No tests were generated for the current diff.",
+    stats,
+    combineStatusMessages(
+      "No tests were generated for the current diff.",
+      statusMessage,
+    ),
   );
+
+const buildNoExecutionStats = (input: {
+  diff: DiffContext;
+  diffMs: number;
+  genMs: number;
+  totalMs: number;
+  allTests: readonly GeneratedTest[];
+  llmStats: ReturnType<LLMClient["getStats"]>;
+}): RunStats =>
+  buildRunStats({
+    diff: input.diff,
+    diffMs: input.diffMs,
+    genMs: input.genMs,
+    execMs: 0,
+    assessMs: 0,
+    totalMs: input.totalMs,
+    allTests: input.allTests,
+    dualResults: [],
+    weakCatches: [],
+    hardeningCandidates: [],
+    reports: [],
+    llmStats: input.llmStats,
+  });
 
 export const createCatchCommandResult = async (
   options: CatchCommandOptions,
@@ -496,7 +548,20 @@ export const createCatchCommandResult = async (
   );
 
   if (allTests.length === 0) {
-    return createNoTestsResult(options, config, diff);
+    return createNoTestsResult(
+      options,
+      config,
+      diff,
+      buildNoExecutionStats({
+        diff,
+        diffMs,
+        genMs,
+        totalMs: Date.now() - startTime,
+        allTests,
+        llmStats: llm.getStats(),
+      }),
+      llm.getBudgetStatusMessage(),
+    );
   }
 
   const executed = await executeCatchWorkflow({
@@ -520,6 +585,7 @@ export const createCatchCommandResult = async (
     executed.reports,
     executed.hardeningCandidates,
     executed.stats,
+    llm.getBudgetStatusMessage(),
   );
 };
 
@@ -571,6 +637,7 @@ export const runCatchCommand = async (
       reportsGenerated: result.stats?.reportsGenerated,
       duration: result.stats?.duration,
       estimatedCost: result.stats?.estimatedCost,
+      llmUsage: result.stats?.llmUsage,
       statusMessage: result.statusMessage,
       reports: result.stats ? result.reports : undefined,
     }).trimEnd(),

@@ -93,6 +93,7 @@ const makeLLM = (risks: readonly InferredRisk[]): LLMClient => {
         outputTokens: 1,
       },
     })),
+    isBudgetExhausted: vi.fn().mockReturnValue(false),
   } as unknown as LLMClient;
 };
 
@@ -103,6 +104,7 @@ describe("inferDiffRisks", () => {
     );
     const llm = {
       completeJson: vi.fn().mockRejectedValue(new Error("bad json")),
+      isBudgetExhausted: vi.fn().mockReturnValue(false),
     } as unknown as LLMClient;
 
     await expect(inferDiffRisks(makeDiff(), llm)).resolves.toEqual({

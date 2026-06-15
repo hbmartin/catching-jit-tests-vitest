@@ -14,23 +14,55 @@ function formatBlockquote(value: string): string {
     .join("\n");
 }
 
+function formatLlmStatus(
+  stats: RunStats | null,
+  statusMessage?: string,
+): string {
+  const lines: string[] = [];
+
+  if (statusMessage !== undefined) {
+    lines.push(escapeHtml(statusMessage));
+  }
+
+  if (stats?.llmUsage.budget.status === "exhausted") {
+    const reason = stats.llmUsage.budget.exhaustedReason ?? "tokens";
+    lines.push(
+      `LLM budget exhausted (${reason}); skipped ${String(
+        stats.llmUsage.budget.skippedCalls,
+      )} future LLM calls.`,
+    );
+  }
+
+  if (stats !== null && !stats.llmUsage.budget.dollarBudgetEnforced) {
+    lines.push(
+      "OpenRouter cost metadata was missing for at least one LLM call; dollar enforcement is unverified.",
+    );
+  }
+
+  return lines.length === 0 ? "" : ` ${lines.join(" ")}`;
+}
+
 function formatPRComment(
   reports: readonly BehaviorReport[],
   stats: RunStats | null,
   statusMessage?: string,
 ): string {
   if (reports.length === 0) {
-    if (statusMessage === undefined) {
+    const status = formatLlmStatus(stats, statusMessage).trim();
+    if (status.length === 0) {
       return "";
     }
 
-    return `## JiTTest: Status\n\n${escapeHtml(statusMessage)}\n`;
+    return `## JiTTest: Status\n\n${status}\n`;
   }
 
   const footer =
     stats === null
       ? ""
-      : `\n---\n<sub>Generated ${String(stats.totalTestsGenerated)} tests across ${String(stats.filesAnalyzed)} files in ${stats.duration}. ${String(stats.weakCatchCount)} weak catches found, ${String(stats.hardeningCandidateCount)} hardening candidates retained, ${String(reports.length)} passed assessment threshold.</sub>\n`;
+      : `\n---\n<sub>Generated ${String(stats.totalTestsGenerated)} tests across ${String(stats.filesAnalyzed)} files in ${stats.duration}. ${String(stats.weakCatchCount)} weak catches found, ${String(stats.hardeningCandidateCount)} hardening candidates retained, ${String(reports.length)} passed assessment threshold.${formatLlmStatus(
+          stats,
+          statusMessage,
+        )}</sub>\n`;
 
   return `## JiTTest: Behavior Change Detection
 

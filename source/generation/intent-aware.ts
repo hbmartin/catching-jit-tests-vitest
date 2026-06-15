@@ -3,7 +3,10 @@ import { getFileAtCommit } from "../diff/extractor.js";
 import type { DiffContext } from "../diff/types.js";
 import { inferRisksPrompt } from "../prompts/templates.js";
 import { inferRisksResponseSchema } from "../runtime-schemas.js";
-import type { LLMClient } from "../utils/llm-client.js";
+import {
+  isLLMBudgetExhaustedError,
+  type LLMClient,
+} from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
 import { resolveProjectContext } from "./context.js";
@@ -28,6 +31,14 @@ async function inferDiffRisks(
     rawDiff: diff.rawDiff,
   });
 
+  if (llm.isBudgetExhausted()) {
+    logger.warn("Skipping risk inference: LLM budget exhausted");
+    return {
+      intent: "",
+      risks: [],
+    };
+  }
+
   try {
     const response = await llm.completeJson(
       {
@@ -46,6 +57,14 @@ async function inferDiffRisks(
       risks: response.risks,
     };
   } catch (err) {
+    if (isLLMBudgetExhaustedError(err)) {
+      logger.warn("Skipping risk inference: LLM budget exhausted");
+      return {
+        intent: "",
+        risks: [],
+      };
+    }
+
     const message = err instanceof Error ? err.message : String(err);
     logger.error(`Risk inference failed: ${message}`);
     return {
@@ -79,6 +98,11 @@ async function generateTestsForRisk(
   llm: LLMClient,
   config: JiTTestConfig,
 ): Promise<GeneratedTest[]> {
+  if (llm.isBudgetExhausted()) {
+    logger.warn(`Skipping risk ${risk.id}: LLM budget exhausted`);
+    return [];
+  }
+
   const normalizedTarget = normalizeTargetSymbol(risk.targetSymbol);
   const targetFile = diff.files.find((f) => {
     if (!matchesRiskTarget(f.path, risk)) {
@@ -127,6 +151,13 @@ async function generateTestsForRisk(
     llm,
   );
   if (!mutant) {
+    return [];
+  }
+
+  if (llm.isBudgetExhausted()) {
+    logger.warn(
+      `Skipping test generation for risk ${risk.id}: LLM budget exhausted`,
+    );
     return [];
   }
 
@@ -182,6 +213,11 @@ async function intentAwareWorkflow(
 
   if (risks.length === 0) {
     logger.info("No risks inferred, skipping intent-aware workflow");
+    return [];
+  }
+
+  if (llm.isBudgetExhausted()) {
+    logger.warn("Skipping intent-aware test generation: LLM budget exhausted");
     return [];
   }
 

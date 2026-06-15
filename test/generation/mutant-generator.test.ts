@@ -31,6 +31,7 @@ const makeLLM = (content: string): LLMClient =>
         outputTokens: 1,
       },
     }),
+    isBudgetExhausted: vi.fn().mockReturnValue(false),
   }) as unknown as LLMClient;
 
 afterEach(() => {
@@ -139,6 +140,7 @@ describe("generateRiskMutant", () => {
       .mockImplementation(() => undefined);
     const llm = {
       complete: vi.fn().mockRejectedValue(new Error("model unavailable")),
+      isBudgetExhausted: vi.fn().mockReturnValue(false),
     } as unknown as LLMClient;
 
     await expect(

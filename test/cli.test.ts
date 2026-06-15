@@ -76,12 +76,21 @@ describe("runCli", () => {
       "Fix auth bug",
       "--pr-body",
       "Preserve login behavior",
+      "--llm-model",
+      "anthropic/claude-sonnet-4",
+      "--max-cost-usd",
+      "0.75",
+      "--max-tokens",
+      "25000",
     ]);
 
     expect(runCatchCommandMock).toHaveBeenCalledWith(
       expect.objectContaining({
         prTitle: "Fix auth bug",
         prBody: "Preserve login behavior",
+        llmModel: "anthropic/claude-sonnet-4",
+        maxCostUsd: 0.75,
+        maxTokens: 25_000,
       }),
     );
   });
