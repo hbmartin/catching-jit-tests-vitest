@@ -518,12 +518,16 @@ export const createCatchCommandResult = async (
   const startTime = Date.now();
   const runId = randomUUID();
   const config = createCommandConfig(options);
-  const llm = new LLMClient(config.llm);
   const { diff, diffMs } = await loadDiffWithRisk(options);
 
   if (diff.riskScore < config.riskThreshold) {
     return createSkippedResult(options, config, diff);
   }
+
+  // Construct the LLM client only once we know we'll generate tests. Risk
+  // scoring is heuristic (no LLM), so a below-threshold skip must not require
+  // an OpenRouter API key.
+  const llm = new LLMClient(config.llm);
 
   const { allTests, genMs } = await generateTests(
     diff,

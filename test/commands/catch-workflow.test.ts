@@ -199,7 +199,6 @@ const mockCatchDependencies = (riskScore = 0.8) => {
     llmUsage: defaultLlmUsage,
   });
   const isBudgetExhaustedMock = vi.fn().mockReturnValue(false);
-  const getBudgetStatusMessageMock = vi.fn().mockReturnValue(undefined);
 
   const mocks = {
     extractDiffContextMock: vi.fn().mockResolvedValue(diffWithoutRisk),
@@ -234,12 +233,10 @@ const mockCatchDependencies = (riskScore = 0.8) => {
       return {
         getStats: getStatsMock,
         isBudgetExhausted: isBudgetExhaustedMock,
-        getBudgetStatusMessage: getBudgetStatusMessageMock,
       };
     }),
     getStatsMock,
     isBudgetExhaustedMock,
-    getBudgetStatusMessageMock,
     logger: {
       info: vi.fn(),
       warn: vi.fn(),

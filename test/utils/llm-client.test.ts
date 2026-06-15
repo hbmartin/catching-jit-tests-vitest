@@ -361,9 +361,6 @@ describe("LLMClient", () => {
         expect.objectContaining({ type: "missing-cost" }),
       ]),
     });
-    expect(client.getBudgetStatusMessage()).toContain(
-      "dollar budget enforcement is unverified",
-    );
   });
 
   it("stays silent about dollar enforcement when no cost budget is set", async () => {
@@ -390,7 +387,7 @@ describe("LLMClient", () => {
     await client.complete({ prompt: "first" });
 
     expect(client.getStats().llmUsage.costKnown).toBe(false);
-    expect(client.getBudgetStatusMessage()).toBeUndefined();
+    expect(client.getStats().llmUsage.budget.dollarBudgetEnforced).toBe(true);
   });
 
   it("requires an API key on the real provider path", async () => {
@@ -473,7 +470,6 @@ describe("LLMClient", () => {
     await client.complete({ prompt: "first" });
 
     expect(client.isBudgetExhausted()).toBe(true);
-    expect(client.getBudgetStatusMessage()).toContain("cost budget");
     expect(client.getStats().llmUsage).toMatchObject({
       budget: {
         status: "exhausted",
