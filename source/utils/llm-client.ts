@@ -496,19 +496,6 @@ class LLMClient {
     return this.stats.budgetStatus === "exhausted";
   }
 
-  getBudgetStatusMessage(): string | undefined {
-    if (this.stats.budgetStatus === "exhausted") {
-      const reason = this.stats.exhaustedReason ?? "tokens";
-      return `LLM ${reason} budget was exhausted; future LLM calls were skipped and non-LLM work continued.`;
-    }
-
-    if (this.stats.budget.maxCostUsd !== undefined && !this.stats.costKnown) {
-      return "OpenRouter cost metadata was missing for at least one LLM call; dollar budget enforcement is unverified.";
-    }
-
-    return undefined;
-  }
-
   getStats(): {
     callCount: number;
     totalInputTokens: number;
