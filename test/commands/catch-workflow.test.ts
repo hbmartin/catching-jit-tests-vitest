@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { CatchCommandOptions } from "../../source/config.js";
@@ -8,6 +10,14 @@ import type {
 } from "../../source/execution/types.js";
 import type { GeneratedTest } from "../../source/generation/types.js";
 import type { BehaviorReport } from "../../source/reporting/types.js";
+
+const mockRepoDir = path.join(process.cwd(), ".jittest", "catch-repo");
+const parentWorktreeDir = path.join(
+  process.cwd(),
+  ".jittest",
+  "parent-worktree",
+);
+const childWorktreeDir = path.join(process.cwd(), ".jittest", "child-worktree");
 
 afterEach(() => {
   vi.resetModules();
@@ -33,7 +43,7 @@ const makeOptions = (
   contextFiles: [],
   include: ["source/**/*.ts"],
   exclude: ["**/*.test.ts"],
-  cwd: "/repo",
+  cwd: mockRepoDir,
   prTitle: "Fix auth",
   prBody: "Preserve authorization behavior",
   llmModel: "openai/gpt-4.1",
@@ -207,8 +217,8 @@ const mockCatchDependencies = (riskScore = 0.8) => {
     dodgyDiffWorkflowMock: vi.fn().mockResolvedValue([]),
     intentAwareWorkflowMock: vi.fn().mockResolvedValue([]),
     setupWorktreesMock: vi.fn().mockResolvedValue({
-      parentDir: "/tmp/parent",
-      childDir: "/tmp/child",
+      parentDir: parentWorktreeDir,
+      childDir: childWorktreeDir,
       cleanup: cleanupMock,
     }),
     cleanupMock,
@@ -313,7 +323,7 @@ describe("createCatchCommandResult", () => {
     });
     expect(mocks.dodgyDiffWorkflowMock).not.toHaveBeenCalled();
     expect(mocks.applyRiskAnalysisMock).toHaveBeenCalledWith(
-      "/repo",
+      mockRepoDir,
       expect.objectContaining({ additionalContext: "loaded context" }),
     );
   });
@@ -380,14 +390,14 @@ describe("createCatchCommandResult", () => {
       expect.stringContaining("Generated 3 tests; executing first 2"),
     );
     expect(mocks.installWorktreeDependenciesMock).toHaveBeenCalledWith(
-      "/tmp/parent",
-      "/tmp/child",
+      parentWorktreeDir,
+      childWorktreeDir,
       true,
     );
     expect(mocks.dualExecutionMock).toHaveBeenCalledWith(
       [dodgyTest, intentTest],
-      "/tmp/parent",
-      "/tmp/child",
+      parentWorktreeDir,
+      childWorktreeDir,
       2,
       1000,
       true,
@@ -562,7 +572,7 @@ describe("runCatchCommand", () => {
 
     expect(mocks.flakeGuardTestsMock).toHaveBeenCalledWith(
       [stableTest, flakyTest],
-      "/tmp/parent",
+      parentWorktreeDir,
       1000,
       2,
       2,
@@ -573,8 +583,8 @@ describe("runCatchCommand", () => {
     // The dropped flaky test never reaches dual execution.
     expect(mocks.dualExecutionMock).toHaveBeenCalledWith(
       [stableTest],
-      "/tmp/parent",
-      "/tmp/child",
+      parentWorktreeDir,
+      childWorktreeDir,
       2,
       1000,
       true,

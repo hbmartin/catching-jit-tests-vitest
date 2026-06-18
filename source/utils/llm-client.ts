@@ -424,6 +424,19 @@ function createProviderOptions(
   } as GenerateTextOptions["providerOptions"];
 }
 
+function serializeProviderOptions(
+  providerOptions: LLMProviderOptions | undefined,
+): string | undefined {
+  if (
+    providerOptions?.openrouter === undefined ||
+    Object.keys(providerOptions.openrouter).length === 0
+  ) {
+    return;
+  }
+
+  return JSON.stringify(providerOptions);
+}
+
 class LLMClient {
   private readonly apiKey: string | undefined;
   private readonly model: string;
@@ -592,7 +605,7 @@ class LLMClient {
       temperature,
       outputKind: descriptor.kind,
       schemaFingerprint: descriptor.schemaFingerprint,
-      providerOptions: JSON.stringify(this.providerOptions ?? {}),
+      providerOptions: serializeProviderOptions(this.providerOptions),
     });
   }
 

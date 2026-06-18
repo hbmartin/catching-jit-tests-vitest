@@ -7,13 +7,19 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GeneratedTest } from "../../source/generation/types.js";
 
 const tempDirs: string[] = [];
+const stableParentDir = path.join(process.cwd(), ".jittest", "parent-worktree");
+const testTempRoot = path.join(process.cwd(), ".jittest", "runner-test-temp");
+
+async function makeTempDir(prefix: string): Promise<string> {
+  await mkdir(testTempRoot, { recursive: true });
+  return mkdtemp(path.join(testTempRoot, prefix));
+}
 
 function makeTest(
   testFilePath: string,
@@ -66,8 +72,8 @@ afterEach(async () => {
 
 describe("dualExecution", () => {
   it("runs parent before child when parallel worktrees are disabled", async () => {
-    const parentDir = await mkdtemp(path.join(tmpdir(), "parent-runner-"));
-    const childDir = await mkdtemp(path.join(tmpdir(), "child-runner-"));
+    const parentDir = await makeTempDir("parent-runner-");
+    const childDir = await makeTempDir("child-runner-");
     tempDirs.push(parentDir, childDir);
 
     let resolveParentRun: (result: { stdout: string; stderr: string }) => void =
@@ -133,7 +139,7 @@ describe("dualExecution", () => {
 
 describe("validateIntentAwareTests", () => {
   it("keeps tests that pass parent and fail the inferred mutant", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-validate-"));
+    const tempDir = await makeTempDir("runner-validate-");
     tempDirs.push(tempDir);
 
     const dodgyTest = makeTest("test/dodgy.jittest.test.ts", {
@@ -209,7 +215,7 @@ describe("validateIntentAwareTests", () => {
 
 describe("runVitest", () => {
   it("indexes outcomes by file path instead of reporter order", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
+    const tempDir = await makeTempDir("runner-test-");
     tempDirs.push(tempDir);
     await writeFile(
       path.join(tempDir, "package.json"),
@@ -278,7 +284,7 @@ describe("runVitest", () => {
   });
 
   it("rejects source overrides that escape the project root", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
+    const tempDir = await makeTempDir("runner-test-");
     tempDirs.push(tempDir);
 
     const { runVitest } = await import("../../source/execution/runner.js");
@@ -297,8 +303,8 @@ describe("runVitest", () => {
   });
 
   it("rejects source overrides through symlinked directories", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
-    const outsideDir = await mkdtemp(path.join(tmpdir(), "runner-outside-"));
+    const tempDir = await makeTempDir("runner-test-");
+    const outsideDir = await makeTempDir("runner-outside-");
     tempDirs.push(tempDir, outsideDir);
     await symlink(outsideDir, path.join(tempDir, "linked-source"), "dir");
 
@@ -317,8 +323,8 @@ describe("runVitest", () => {
   });
 
   it("surfaces source restore failures after best-effort cleanup", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
-    const outsideDir = await mkdtemp(path.join(tmpdir(), "runner-outside-"));
+    const tempDir = await makeTempDir("runner-test-");
+    const outsideDir = await makeTempDir("runner-outside-");
     tempDirs.push(tempDir, outsideDir);
 
     const sourceDir = path.join(tempDir, "source");
@@ -361,8 +367,8 @@ describe("runVitest", () => {
   });
 
   it("does not classify cleanup failures as parse failures after command errors", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-test-"));
-    const outsideDir = await mkdtemp(path.join(tmpdir(), "runner-outside-"));
+    const tempDir = await makeTempDir("runner-test-");
+    const outsideDir = await makeTempDir("runner-outside-");
     tempDirs.push(tempDir, outsideDir);
 
     const sourceDir = path.join(tempDir, "source");
@@ -433,7 +439,7 @@ describe("runVitest", () => {
 
 describe("validateIntentAwareTests", () => {
   it("batches tests by mutant, discards weak tests, and restores source files", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "validate-test-"));
+    const tempDir = await makeTempDir("validate-test-");
     tempDirs.push(tempDir);
 
     const sourceFile = path.join(tempDir, "source/module.ts");
@@ -572,7 +578,7 @@ describe("validateIntentAwareTests", () => {
   });
 
   it("falls back to generated tests when mutant validation fails", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "validate-test-"));
+    const tempDir = await makeTempDir("validate-test-");
     tempDirs.push(tempDir);
     const escapedName = `${path.basename(tempDir)}-escaped.ts`;
     const escapedPath = path.resolve(tempDir, `../${escapedName}`);
@@ -629,7 +635,7 @@ describe("validateIntentAwareTests", () => {
   });
 
   it("runs the parent validation once across different mutants", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "validate-test-"));
+    const tempDir = await makeTempDir("validate-test-");
     tempDirs.push(tempDir);
 
     await mkdir(path.join(tempDir, "source"), { recursive: true });
@@ -771,7 +777,7 @@ describe("flakeGuardTests", () => {
   });
 
   it("drops tests that do not pass every parent run", async () => {
-    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-flake-"));
+    const tempDir = await makeTempDir("runner-flake-");
     tempDirs.push(tempDir);
 
     const stableTest = makeTest("test/stable.jittest.test.ts");
@@ -830,7 +836,7 @@ describe("flakeGuardTests", () => {
     );
 
     const tests = [makeTest("test/a.jittest.test.ts")];
-    const result = await flakeGuardTests(tests, "/tmp/parent", 500, 1, 10);
+    const result = await flakeGuardTests(tests, stableParentDir, 500, 1, 10);
 
     expect(result.stableTests).toEqual(tests);
     expect(result.droppedCount).toBe(0);

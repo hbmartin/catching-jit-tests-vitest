@@ -5,7 +5,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -24,6 +23,14 @@ vi.mock("../source/commands/catch.js", () => ({
 vi.mock("../source/commands/calibrate.js", () => ({
   runCalibrateCommand: runCalibrateCommandMock,
 }));
+
+const cliRepoPath = path.join(process.cwd(), ".jittest", "cli-repo");
+const testTempRoot = path.join(process.cwd(), ".jittest", "test-temp");
+
+function makeTempDir(prefix: string): string {
+  mkdirSync(testTempRoot, { recursive: true });
+  return mkdtempSync(path.join(testTempRoot, prefix));
+}
 
 describe("runCli", () => {
   beforeEach(() => {
@@ -135,7 +142,7 @@ describe("runCli", () => {
       "--context-file",
       "docs/security.md",
       "--cwd",
-      "/tmp/repo",
+      cliRepoPath,
     ]);
 
     expect(runCatchCommandMock).toHaveBeenCalledWith(
@@ -150,7 +157,7 @@ describe("runCli", () => {
         reportThreshold: -0.1,
         feedbackPath: ".cache/records.jsonl",
         contextFiles: ["docs/intent.md", "docs/security.md"],
-        cwd: "/tmp/repo",
+        cwd: cliRepoPath,
       }),
     );
   });
@@ -189,14 +196,14 @@ describe("runCli", () => {
       "--output",
       "json",
       "--cwd",
-      "/tmp/repo",
+      cliRepoPath,
     ]);
 
     expect(runCalibrateCommandMock).toHaveBeenCalledWith(
       expect.objectContaining({
         feedbackPath: "records.jsonl",
         output: "json",
-        cwd: "/tmp/repo",
+        cwd: cliRepoPath,
       }),
     );
   });
@@ -218,7 +225,7 @@ describe("runCli", () => {
 
 describe("isDirectExecution", () => {
   it("matches pnpm-style symlinked package bin paths", () => {
-    const tempDir = mkdtempSync(path.join(tmpdir(), "jittest-cli-"));
+    const tempDir = makeTempDir("jittest-cli-");
     const originalArgv = process.argv;
 
     try {

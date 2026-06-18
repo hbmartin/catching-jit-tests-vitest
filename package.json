@@ -61,7 +61,7 @@
     "typecheck": "tsc --noEmit"
   },
   "type": "module",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "devDependencies": {
     "@biomejs/biome": "^2.5.0",
     "@sindresorhus/tsconfig": "^8.1.0",

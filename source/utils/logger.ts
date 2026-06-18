@@ -27,13 +27,13 @@ function formatMessage(level: LogLevel, message: string): string {
 // already go to stderr via console.warn/console.error.
 function debug(message: string): void {
   if (shouldLog("debug")) {
-    process.stderr.write(`${formatMessage("debug", message)}\n`);
+    process.stderr?.write(`${formatMessage("debug", message)}\n`);
   }
 }
 
 function info(message: string): void {
   if (shouldLog("info")) {
-    process.stderr.write(`${formatMessage("info", message)}\n`);
+    process.stderr?.write(`${formatMessage("info", message)}\n`);
   }
 }
 
