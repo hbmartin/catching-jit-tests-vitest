@@ -22,15 +22,18 @@ function formatMessage(level: LogLevel, message: string): string {
   return `[${timestamp}] [${level.toUpperCase()}] ${message}`;
 }
 
+// info/debug write to stderr (not stdout) so that stdout carries only command
+// output — keeping `--output json` and `| jq` pipelines parseable. warn/error
+// already go to stderr via console.warn/console.error.
 function debug(message: string): void {
   if (shouldLog("debug")) {
-    console.debug(formatMessage("debug", message));
+    process.stderr.write(`${formatMessage("debug", message)}\n`);
   }
 }
 
 function info(message: string): void {
   if (shouldLog("info")) {
-    console.info(formatMessage("info", message));
+    process.stderr.write(`${formatMessage("info", message)}\n`);
   }
 }
 

@@ -434,6 +434,8 @@ const assessWeakCatches = async (input: {
   // Feedback records are appended through a serialized promise chain so the
   // concurrent assessments below never interleave partial writes into the
   // JSONL file. (Assessment itself is independent per weak catch.)
+  // recordAssessmentFeedback swallows its own errors, so the chain is never
+  // poisoned by a failed write.
   let appendChain: Promise<void> = Promise.resolve();
   const enqueueAppend = (task: () => Promise<void>): Promise<void> => {
     appendChain = appendChain.then(task);

@@ -405,8 +405,9 @@ function schemaFingerprint(schema: ZodType<unknown>): string {
   try {
     return JSON.stringify(z.toJSONSchema(schema));
   } catch {
-    // Some schemas (e.g. with custom refinements) cannot be serialized to JSON
-    // Schema; fall back to a stable-but-coarse marker rather than failing.
+    // Unreachable in practice: the AI SDK's Output.object() also calls
+    // z.toJSONSchema and throws on an unserializable schema before generation,
+    // so such a schema never reaches the cache. Kept as a defensive marker.
     return "unserializable-schema";
   }
 }
@@ -591,6 +592,7 @@ class LLMClient {
       temperature,
       outputKind: descriptor.kind,
       schemaFingerprint: descriptor.schemaFingerprint,
+      providerOptions: JSON.stringify(this.providerOptions ?? {}),
     });
   }
 

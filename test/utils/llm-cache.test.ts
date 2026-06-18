@@ -39,6 +39,12 @@ describe("computeCacheKey", () => {
     expect(
       computeCacheKey({ ...baseKeyInput, schemaFingerprint: "{...}" }),
     ).not.toBe(base);
+    expect(
+      computeCacheKey({
+        ...baseKeyInput,
+        providerOptions: '{"openrouter":{"reasoning":{"effort":"high"}}}',
+      }),
+    ).not.toBe(base);
   });
 });
 
