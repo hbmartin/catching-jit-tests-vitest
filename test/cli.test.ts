@@ -7,7 +7,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { isDirectExecution, runCli } from "../source/cli.js";
 import { cliVersion } from "../source/version.js";
 
@@ -31,6 +31,10 @@ function makeTempDir(prefix: string): string {
   mkdirSync(testTempRoot, { recursive: true });
   return mkdtempSync(path.join(testTempRoot, prefix));
 }
+
+afterAll(() => {
+  rmSync(testTempRoot, { recursive: true, force: true });
+});
 
 describe("runCli", () => {
   beforeEach(() => {

@@ -2,13 +2,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createDefaultConfig,
   loadConfig,
   parseCatchCommandOptions,
 } from "../source/config.js";
+import { logger } from "../source/utils/logger.js";
 
 describe("createDefaultConfig", () => {
   const originalApiKey = process.env.OPENROUTER_API_KEY;
@@ -185,6 +186,30 @@ describe("loadConfig with a config file", () => {
     return filePath;
   };
 
+  const mockLoggerWarn = () =>
+    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+
+  const nestedLlmFileConfig = () => ({
+    llm: {
+      budget: { maxCostUsd: 1.25, maxTokens: 50_000 },
+      providerOptions: {
+        openrouter: {
+          reasoning: { effort: "medium" },
+          transforms: ["middle-out"],
+        },
+      },
+    },
+  });
+
+  const nestedLlmOverrides = () => ({
+    llm: {
+      budget: { maxTokens: 10_000 },
+      providerOptions: {
+        openrouter: { reasoning: { effort: "low" } },
+      },
+    },
+  });
+
   it("reads assessor weights from an explicit config path", () => {
     const filePath = writeConfig({
       assessors: { rubfakeWeight: 0.7, llmWeight: 0.3 },
@@ -216,34 +241,9 @@ describe("loadConfig with a config file", () => {
   });
 
   it("deep-merges nested llm objects from file config and CLI overrides", () => {
-    writeConfig({
-      llm: {
-        budget: {
-          maxCostUsd: 1.25,
-          maxTokens: 50_000,
-        },
-        providerOptions: {
-          openrouter: {
-            reasoning: { effort: "medium" },
-            transforms: ["middle-out"],
-          },
-        },
-      },
-    });
+    writeConfig(nestedLlmFileConfig());
 
-    const config = loadConfig(
-      {
-        llm: {
-          budget: { maxTokens: 10_000 },
-          providerOptions: {
-            openrouter: {
-              reasoning: { effort: "low" },
-            },
-          },
-        },
-      },
-      { cwd: dir },
-    );
+    const config = loadConfig(nestedLlmOverrides(), { cwd: dir });
 
     expect(config.llm.budget).toEqual({
       maxCostUsd: 1.25,
@@ -253,6 +253,139 @@ describe("loadConfig with a config file", () => {
       reasoning: { effort: "low" },
       transforms: ["middle-out"],
     });
+  });
+
+  it("warns per leaf when a CLI override replaces a file value", () => {
+    const warnSpy = mockLoggerWarn();
+    try {
+      writeConfig(nestedLlmFileConfig());
+
+      loadConfig(nestedLlmOverrides(), { cwd: dir });
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        "llm.budget.maxTokens: 50000 -> 10000",
+      );
+      expect(warnSpy).toHaveBeenCalledWith(
+        "llm.providerOptions.openrouter.reasoning.effort: medium -> low",
+      );
+      // Only the two replaced leaves warn; retained file values stay quiet.
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does not warn when a CLI override only adds new nested leaves", () => {
+    const warnSpy = mockLoggerWarn();
+    try {
+      writeConfig({
+        llm: {
+          budget: { maxCostUsd: 1.25 },
+          providerOptions: {
+            openrouter: { transforms: ["middle-out"] },
+          },
+        },
+      });
+
+      loadConfig(
+        {
+          llm: {
+            budget: { maxTokens: 10_000 },
+            providerOptions: {
+              openrouter: { reasoning: { effort: "low" } },
+            },
+          },
+        },
+        { cwd: dir },
+      );
+
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("does not let undefined nested CLI overrides clobber file values", () => {
+    const warnSpy = mockLoggerWarn();
+    try {
+      writeConfig({
+        llm: {
+          budget: { maxTokens: 50_000 },
+          providerOptions: {
+            openrouter: {
+              routing: "file",
+              transforms: ["middle-out"],
+            },
+          },
+        },
+      });
+
+      const config = loadConfig(
+        {
+          llm: {
+            budget: { maxTokens: undefined },
+            providerOptions: {
+              openrouter: {
+                routing: undefined,
+                reasoning: { effort: "low" },
+              },
+            },
+          },
+        },
+        { cwd: dir },
+      );
+
+      expect(config.llm.budget.maxTokens).toBe(50_000);
+      expect(config.llm.providerOptions.openrouter).toEqual({
+        reasoning: { effort: "low" },
+        routing: "file",
+        transforms: ["middle-out"],
+      });
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it("drops forbidden nested merge keys from file and CLI provider options", () => {
+    writeConfig({
+      llm: {
+        providerOptions: {
+          constructor: { polluted: true },
+          openrouter: {
+            ["__proto__"]: { polluted: true },
+            routing: "file",
+          },
+        },
+      },
+    });
+
+    const config = loadConfig(
+      {
+        llm: {
+          providerOptions: {
+            custom: {
+              prototype: "polluted",
+              routing: "cli",
+            },
+            prototype: { polluted: true },
+          },
+        },
+      },
+      { cwd: dir },
+    );
+
+    expect(config.llm.providerOptions).toEqual({
+      custom: { routing: "cli" },
+      openrouter: { routing: "file" },
+    });
+    expect(Object.hasOwn(config.llm.providerOptions, "constructor")).toBe(
+      false,
+    );
+    expect(Object.hasOwn(config.llm.providerOptions, "prototype")).toBe(false);
+    expect(
+      Object.hasOwn(config.llm.providerOptions.openrouter ?? {}, "__proto__"),
+    ).toBe(false);
   });
 
   it("does not let absent CLI flags clobber file values with defaults", () => {
