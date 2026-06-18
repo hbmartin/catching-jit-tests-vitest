@@ -201,7 +201,8 @@ function pruneUndefined(
 const FORBIDDEN_MERGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 // A leaf where a higher-precedence layer (CLI) replaced a different value the
-// config file had already set. Surfaced as a warning so the override is visible.
+// config file had already set. Logged so the override is visible. This is
+// expected behavior, not a fault, so it surfaces at info rather than warn.
 interface MergeConflict {
   readonly path: string;
   readonly from: unknown;
@@ -241,8 +242,8 @@ function mergeRecords(
   pathPrefix: string,
   conflicts: MergeConflict[],
 ): Record<string, unknown> {
-  const result = sanitizeMergeRecord(base);
-  const safeOverrides = sanitizeMergeRecord(overrides);
+  const result = { ...base };
+  const safeOverrides = overrides;
   for (const [key, overrideValue] of Object.entries(safeOverrides)) {
     if (overrideValue !== undefined) {
       const baseValue = result[key];
@@ -284,7 +285,12 @@ function mergeNestedRecord(
   }
 
   if (isRecord(baseValue) && isRecord(overrideValue)) {
-    return mergeRecords(baseValue, overrideValue, `llm.${key}`, conflicts);
+    return mergeRecords(
+      sanitizeMergeRecord(baseValue),
+      sanitizeMergeRecord(overrideValue),
+      `llm.${key}`,
+      conflicts,
+    );
   }
 
   return isRecord(overrideValue)
@@ -414,8 +420,8 @@ function loadConfig(
   };
 
   for (const { path: conflictPath, from, to } of conflicts) {
-    logger.warn(
-      `${conflictPath}: ${formatOverrideValue(from)} -> ${formatOverrideValue(to)}`,
+    logger.info(
+      `config override: ${conflictPath}: ${formatOverrideValue(from)} -> ${formatOverrideValue(to)}`,
     );
   }
 
