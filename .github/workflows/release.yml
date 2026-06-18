@@ -68,6 +68,9 @@ jobs:
       - name: Verify build artifacts
         run: pnpm run release:verify-artifacts
 
+      - name: Verify packaged CLI
+        run: pnpm run release:verify-cli
+
       - name: Verify packed package
         run: npm pack --dry-run
 

@@ -9,12 +9,26 @@
   },
   "author": "Harold Martin <harold.martin@gmail.com>",
   "dependencies": {
+    "@ai-sdk/openai-compatible": "^2.0.51",
     "@openrouter/ai-sdk-provider": "^2.9.1",
-    "ai": "^6.0.206",
+    "ai": "^6.0.207",
     "picomatch": "^4.0.4",
+    "typescript": "^6.0.3",
     "zod": "^4.4.3"
   },
   "description": "For every PR/diff, you need to: generate tests against the parent branch that pass, run those same tests against the PR branch, and harvest the ones that now fail (\"weak catches\"). The hard part is everything around that — making the test generation diff-aware, and then filtering false positives so engineers don't ignore the signal.",
+  "keywords": [
+    "vitest",
+    "testing",
+    "test-generation",
+    "regression-testing",
+    "mutation-testing",
+    "git-diff",
+    "typescript",
+    "cli",
+    "llm",
+    "openrouter"
+  ],
   "engines": {
     "node": ">=22"
   },
@@ -42,6 +56,7 @@
     "publint": "publint --pack npm",
     "release:check-version": "node scripts/check-release-version.mjs",
     "release:verify-artifacts": "node scripts/verify-package-artifacts.mjs",
+    "release:verify-cli": "node scripts/verify-package-cli.mjs",
     "test": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
@@ -52,10 +67,9 @@
     "@sindresorhus/tsconfig": "^8.1.0",
     "@types/node": "^22",
     "@types/picomatch": "^4.0.3",
-    "@vitest/coverage-istanbul": "^4.1.8",
+    "@vitest/coverage-istanbul": "^4.1.9",
     "jscpd": "^5.0.9",
     "publint": "^0.3.21",
-    "typescript": "^6.0.3",
-    "vitest": "^4.1.8"
+    "vitest": "^4.1.9"
   }
 }

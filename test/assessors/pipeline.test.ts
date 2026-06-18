@@ -4,31 +4,44 @@ import {
   estimateDismissalDifficulty,
   scoreToVerdict,
 } from "../../source/assessors/pipeline.js";
+import { assessorsConfigSchema } from "../../source/config.js";
 import type { WeakCatch } from "../../source/harvest/types.js";
+
+const defaultThresholds = assessorsConfigSchema.parse({}).verdictThresholds;
 
 describe("scoreToVerdict", () => {
   it("returns strong-catch for high scores", () => {
-    expect(scoreToVerdict(0.8)).toBe("strong-catch");
-    expect(scoreToVerdict(0.6)).toBe("strong-catch");
+    expect(scoreToVerdict(0.8, defaultThresholds)).toBe("strong-catch");
+    expect(scoreToVerdict(0.6, defaultThresholds)).toBe("strong-catch");
   });
 
   it("returns likely-strong for moderate-high scores", () => {
-    expect(scoreToVerdict(0.4)).toBe("likely-strong");
-    expect(scoreToVerdict(0.3)).toBe("likely-strong");
+    expect(scoreToVerdict(0.4, defaultThresholds)).toBe("likely-strong");
+    expect(scoreToVerdict(0.3, defaultThresholds)).toBe("likely-strong");
   });
 
   it("returns uncertain for near-zero scores", () => {
-    expect(scoreToVerdict(0.0)).toBe("uncertain");
-    expect(scoreToVerdict(-0.2)).toBe("uncertain");
+    expect(scoreToVerdict(0.0, defaultThresholds)).toBe("uncertain");
+    expect(scoreToVerdict(-0.2, defaultThresholds)).toBe("uncertain");
   });
 
   it("returns likely-false-positive for moderate-low scores", () => {
-    expect(scoreToVerdict(-0.4)).toBe("likely-false-positive");
+    expect(scoreToVerdict(-0.4, defaultThresholds)).toBe(
+      "likely-false-positive",
+    );
   });
 
   it("returns false-positive for very low scores", () => {
-    expect(scoreToVerdict(-0.7)).toBe("false-positive");
-    expect(scoreToVerdict(-1.0)).toBe("false-positive");
+    expect(scoreToVerdict(-0.7, defaultThresholds)).toBe("false-positive");
+    expect(scoreToVerdict(-1.0, defaultThresholds)).toBe("false-positive");
+  });
+
+  it("honors custom verdict thresholds", () => {
+    const strict = assessorsConfigSchema.parse({
+      verdictThresholds: { strongCatch: 0.9 },
+    }).verdictThresholds;
+    expect(scoreToVerdict(0.8, strict)).toBe("likely-strong");
+    expect(scoreToVerdict(0.9, strict)).toBe("strong-catch");
   });
 });
 

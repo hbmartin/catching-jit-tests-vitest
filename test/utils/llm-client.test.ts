@@ -5,6 +5,7 @@ afterEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   vi.doUnmock("@openrouter/ai-sdk-provider");
+  vi.doUnmock("@ai-sdk/openai-compatible");
   vi.doUnmock("ai");
 });
 
@@ -525,5 +526,185 @@ describe("LLMClient", () => {
           provider: "openai" as never,
         }),
     ).toThrow("Unsupported LLM provider: openai");
+  });
+
+  it("uses an injected languageModel without requiring an API key", async () => {
+    const languageModel = { provider: "custom", modelId: "byo" };
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "injected",
+        inputTokens: 1,
+        outputTokens: 1,
+        providerMetadata: null,
+      }),
+    );
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+
+    // No apiKey, no provider machinery — library users bring their own model.
+    const client = new LLMClient(
+      {
+        model: "label/model",
+        maxTokens: 10,
+        languageModel: languageModel as never,
+      },
+      undefined,
+      undefined,
+      generateTextMock as never,
+    );
+
+    const response = await client.complete({ prompt: "hello" });
+
+    expect(response.content).toBe("injected");
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: languageModel }),
+    );
+  });
+
+  it("resolves and swaps models through an injected modelFactory", async () => {
+    const modelA = { id: "a" };
+    const modelB = { id: "b" };
+    const modelFactory = vi.fn((id: string) =>
+      id === "m-a" ? modelA : modelB,
+    );
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "ok",
+        inputTokens: 1,
+        outputTokens: 1,
+        providerMetadata: null,
+      }),
+    );
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+
+    const client = new LLMClient(
+      {
+        model: "m-a",
+        maxTokens: 10,
+        modelFactory: modelFactory as never,
+      },
+      undefined,
+      undefined,
+      generateTextMock as never,
+    );
+
+    await client.complete({ prompt: "first" });
+    const swapped = client.withModel("m-b");
+    await swapped.complete({ prompt: "second" });
+
+    expect(modelFactory).toHaveBeenCalledWith("m-a");
+    expect(modelFactory).toHaveBeenCalledWith("m-b");
+    expect(generateTextMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ model: modelB }),
+    );
+  });
+
+  it("builds an openai-compatible provider and resolves models through it", async () => {
+    const languageModel = { provider: "oai-compat", modelId: "z" };
+    const providerFn = vi.fn().mockReturnValue(languageModel);
+    const createOpenAICompatibleMock = vi.fn().mockReturnValue(providerFn);
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "compat",
+        inputTokens: 2,
+        outputTokens: 2,
+        providerMetadata: null,
+      }),
+    );
+
+    vi.doMock("@ai-sdk/openai-compatible", () => ({
+      createOpenAICompatible: createOpenAICompatibleMock,
+    }));
+    vi.doMock("ai", async (importOriginal) => ({
+      ...(await importOriginal<typeof import("ai")>()),
+      generateText: generateTextMock,
+    }));
+
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+    const client = new LLMClient({
+      apiKey: "compat-key",
+      model: "meta-llama/Llama-3-70b",
+      maxTokens: 10,
+      provider: "openai-compatible",
+      baseUrl: "https://api.example.com/v1",
+    });
+
+    await client.complete({ prompt: "hello" });
+
+    expect(createOpenAICompatibleMock).toHaveBeenCalledWith({
+      name: "jittest",
+      baseURL: "https://api.example.com/v1",
+      apiKey: "compat-key",
+    });
+    expect(providerFn).toHaveBeenCalledWith("meta-llama/Llama-3-70b");
+    expect(generateTextMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: languageModel }),
+    );
+  });
+
+  it("requires a base URL for the openai-compatible provider", async () => {
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+
+    expect(
+      () =>
+        new LLMClient({
+          apiKey: "k",
+          model: "model",
+          maxTokens: 1,
+          provider: "openai-compatible",
+        }),
+    ).toThrow(/base URL is required/);
+  });
+
+  it("serves repeated requests from cache as zero-cost hits", async () => {
+    const { provider } = makeProvider();
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "cached body",
+        inputTokens: 9,
+        outputTokens: 6,
+        costUsd: 0.003,
+      }),
+    );
+
+    const store = new Map<string, unknown>();
+    const cache = {
+      get: vi.fn(async (key: string) => store.get(key)),
+      set: vi.fn(async (key: string, value: unknown) => {
+        store.set(key, value);
+      }),
+    };
+
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+    const client = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+        cache: cache as never,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+
+    const first = await client.complete({ prompt: "same prompt" });
+    const second = await client.complete({ prompt: "same prompt" });
+
+    // The model is only invoked once; the second call is a cache hit.
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    expect(cache.set).toHaveBeenCalledTimes(1);
+    expect(first.content).toBe("cached body");
+    expect(second.content).toBe("cached body");
+
+    const stats = client.getStats();
+    // The hit does not increment the (real) call count or token/cost totals.
+    expect(stats.callCount).toBe(1);
+    expect(stats.totalTokens).toBe(15);
+    expect(stats.estimatedCost).toBeCloseTo(0.003);
+    expect(stats.llmUsage.cacheHits).toBe(1);
+    expect(stats.llmUsage.events).toContainEqual(
+      expect.objectContaining({ type: "cache-hit" }),
+    );
   });
 });

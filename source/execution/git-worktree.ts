@@ -1,4 +1,4 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -18,6 +18,11 @@ const packageManagerInstallArgs: Record<PackageManager, readonly string[]> = {
   npm: ["ci", "--prefer-offline"],
   pnpm: ["install", "--frozen-lockfile"],
   yarn: ["install", "--frozen-lockfile"],
+};
+const packageManagerLockfile: Record<PackageManager, string> = {
+  npm: "package-lock.json",
+  pnpm: "pnpm-lock.yaml",
+  yarn: "yarn.lock",
 };
 const windowsShellUnsafePattern = /["&|<>^%!\r\n]/;
 
@@ -122,7 +127,6 @@ async function installDependencies(projectDir: string): Promise<void> {
 
   try {
     await runPackageManagerInstall(projectDir, preferred);
-    return;
   } catch (error) {
     if (!isMissingPackageManagerError(error, preferred)) {
       throw error;
@@ -153,6 +157,89 @@ async function pathExists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function readFileIfExists(filePath: string): Promise<string | null> {
+  try {
+    return await readFile(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+}
+
+// The two worktrees install the same dependency set whenever their lockfiles are
+// byte-identical, which is the common case (most PRs do not touch the lockfile).
+async function lockfilesMatch(
+  parentDir: string,
+  childDir: string,
+): Promise<boolean> {
+  const { preferred } = await detectPackageManagerOrder(parentDir);
+  const lockfileName = packageManagerLockfile[preferred];
+  const [parentLock, childLock] = await Promise.all([
+    readFileIfExists(path.join(parentDir, lockfileName)),
+    readFileIfExists(path.join(childDir, lockfileName)),
+  ]);
+
+  return parentLock !== null && parentLock === childLock;
+}
+
+// Point the child worktree's node_modules at the parent's. Generated tests and
+// mutant overrides only ever write source/test files, never node_modules, so a
+// shared install is safe. Returns false if the symlink could not be created.
+async function linkNodeModules(
+  parentDir: string,
+  childDir: string,
+): Promise<boolean> {
+  const target = path.join(parentDir, "node_modules");
+  const linkPath = path.join(childDir, "node_modules");
+
+  if (!(await pathExists(target))) {
+    return false;
+  }
+
+  try {
+    await rm(linkPath, { recursive: true, force: true });
+    // "junction" is required for directory links on Windows and ignored on
+    // POSIX; the target is absolute, as junctions require.
+    await symlink(target, linkPath, "junction");
+    return true;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`Failed to reuse parent node_modules in child: ${message}`);
+    return false;
+  }
+}
+
+// Install dependencies into both worktrees, reusing a single install when the
+// lockfiles are identical. Falls back to installing each worktree separately.
+async function installWorktreeDependencies(
+  parentDir: string,
+  childDir: string,
+  parallel: boolean,
+): Promise<void> {
+  if (await lockfilesMatch(parentDir, childDir)) {
+    await installDependencies(parentDir);
+    if (await linkNodeModules(parentDir, childDir)) {
+      logger.info(
+        "Lockfiles identical across refs; reused parent dependencies in child worktree",
+      );
+      return;
+    }
+    // Linking failed (e.g. permissions); install the child normally.
+    await installDependencies(childDir);
+    return;
+  }
+
+  if (parallel) {
+    await Promise.all([
+      installDependencies(parentDir),
+      installDependencies(childDir),
+    ]);
+    return;
+  }
+
+  await installDependencies(parentDir);
+  await installDependencies(childDir);
 }
 
 function parseDeclaredPackageManager(
@@ -361,6 +448,7 @@ export {
   buildPackageManagerExecCommand,
   detectPackageManagerOrder,
   installDependencies,
+  installWorktreeDependencies,
   runPackageManagerExec,
   setupWorktrees,
 };

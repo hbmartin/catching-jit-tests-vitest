@@ -186,3 +186,46 @@ jittest catch \
   --feedback-path artifacts/jittest-$(git rev-parse --short HEAD).jsonl \
   --output json > "artifacts/jittest-$(git rev-parse --short HEAD).json"
 ```
+
+## Tuning the assessors
+
+The two thresholds above gate *reporting*. The `assessors` block controls how
+the combined score that those thresholds act on is computed. It lives in
+`jittest.config.json`:
+
+```json
+{
+  "assessors": {
+    "rubfakeWeight": 0.4,
+    "llmWeight": 0.6,
+    "rubfakeOverrideScore": -0.8,
+    "verdictThresholds": { "strongCatch": 0.6, "likelyStrong": 0.3, "uncertain": -0.3, "likelyFalsePositive": -0.6 },
+    "dismissalThresholds": { "trivial": -0.2, "easy": 0, "moderate": 0.3, "hard": 0.5 }
+  }
+}
+```
+
+- `rubfakeWeight` / `llmWeight` weight the rule-based and LLM-judge scores in
+  the combined score. Raise `rubfakeWeight` if you trust the static rules more
+  than the judge (cheaper, more deterministic); raise `llmWeight` for the
+  reverse.
+- `rubfakeOverrideScore` is the rule-based score at or below which a
+  high-confidence false-positive shortcuts the judge entirely.
+- `verdictThresholds` map the combined score to a verdict label.
+- `dismissalThresholds` raise the effective report threshold for catches that
+  are easy to dismiss (a trivial boolean flip must clear a lower bar than a
+  hard-to-triage ordering change).
+
+Rather than guessing, label some feedback records and let
+[`jittest calibrate`](../readme.md#calibration) grid-search these weights and a
+report threshold against your labels. It prints precision/recall/F1 for the
+current config versus the best it found, plus a ready-to-paste block.
+
+## Dropping flaky catches
+
+A generated test that only *sometimes* passes on the parent can masquerade as a
+weak catch (passes on parent, "fails" on child) when really it is just
+non-deterministic. `--flake-guard-runs N` re-runs every candidate `N` times on
+the parent and drops any that are not green on all `N` runs, before dual
+execution. Start at `--flake-guard-runs 3` if you see catches that do not
+reproduce; it trades extra parent runs for a cleaner signal.

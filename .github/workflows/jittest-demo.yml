@@ -1,0 +1,248 @@
+name: JiTTest Demo
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      base-ref:
+        description: Git ref to use as the parent revision.
+        required: true
+        default: origin/main
+        type: string
+      head-ref:
+        description: Git ref to use as the child revision.
+        required: true
+        default: HEAD
+        type: string
+      workflow:
+        description: JiTTest generation workflow.
+        required: true
+        default: both
+        type: choice
+        options:
+          - dodgy-diff
+          - intent-aware
+          - both
+      llm-model:
+        description: OpenRouter model id.
+        required: true
+        default: anthropic/claude-sonnet-4
+        type: string
+      risk-threshold:
+        description: Minimum diff risk score required before generating tests.
+        required: true
+        default: "0.35"
+        type: string
+      report-threshold:
+        description: Minimum assessment score required before reporting catches.
+        required: true
+        default: "0.4"
+        type: string
+      tests-per-function:
+        description: Number of generated test candidates per changed function.
+        required: true
+        default: "1"
+        type: string
+      max-total-tests:
+        description: Maximum generated tests to execute.
+        required: true
+        default: "10"
+        type: string
+      max-cost-usd:
+        description: Run-level OpenRouter dollar budget.
+        required: true
+        default: "1"
+        type: string
+      max-tokens:
+        description: Run-level LLM token budget.
+        required: true
+        default: "120000"
+        type: string
+      pr-title:
+        description: Optional PR title for intent-aware analysis.
+        required: false
+        default: ""
+        type: string
+      pr-body:
+        description: Optional PR body for intent-aware analysis.
+        required: false
+        default: ""
+        type: string
+      context-file:
+        description: Optional local context file path for intent-aware analysis.
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  jittest:
+    name: Run JiTTest
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          version: 11.1.3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.13"
+          cache: "pnpm"
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build CLI
+        run: pnpm build
+
+      - name: Run JiTTest
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          JITTEST_BASE_REF: ${{ inputs['base-ref'] }}
+          JITTEST_HEAD_REF: ${{ inputs['head-ref'] }}
+          JITTEST_WORKFLOW: ${{ inputs.workflow }}
+          JITTEST_LLM_MODEL: ${{ inputs['llm-model'] }}
+          JITTEST_RISK_THRESHOLD: ${{ inputs['risk-threshold'] }}
+          JITTEST_REPORT_THRESHOLD: ${{ inputs['report-threshold'] }}
+          JITTEST_TESTS_PER_FUNCTION: ${{ inputs['tests-per-function'] }}
+          JITTEST_MAX_TOTAL_TESTS: ${{ inputs['max-total-tests'] }}
+          JITTEST_MAX_COST_USD: ${{ inputs['max-cost-usd'] }}
+          JITTEST_MAX_TOKENS: ${{ inputs['max-tokens'] }}
+          JITTEST_PR_TITLE: ${{ inputs['pr-title'] }}
+          JITTEST_PR_BODY: ${{ inputs['pr-body'] }}
+          JITTEST_CONTEXT_FILE: ${{ inputs['context-file'] }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${OPENROUTER_API_KEY:-}" ]; then
+            echo "OPENROUTER_API_KEY secret is required to run JiTTest." >&2
+            exit 1
+          fi
+
+          mkdir -p .jittest
+
+          args=(
+            catch
+            --base "${JITTEST_BASE_REF}"
+            --head "${JITTEST_HEAD_REF}"
+            --workflow "${JITTEST_WORKFLOW}"
+            --llm-model "${JITTEST_LLM_MODEL}"
+            --risk-threshold "${JITTEST_RISK_THRESHOLD}"
+            --report-threshold "${JITTEST_REPORT_THRESHOLD}"
+            --tests-per-function "${JITTEST_TESTS_PER_FUNCTION}"
+            --max-total-tests "${JITTEST_MAX_TOTAL_TESTS}"
+            --max-cost-usd "${JITTEST_MAX_COST_USD}"
+            --max-tokens "${JITTEST_MAX_TOKENS}"
+            --pr-title "${JITTEST_PR_TITLE}"
+            --pr-body "${JITTEST_PR_BODY}"
+            --output json
+          )
+
+          if [ -n "${JITTEST_CONTEXT_FILE}" ]; then
+            args+=(--context-file "${JITTEST_CONTEXT_FILE}")
+          fi
+
+          node dist/cli.js "${args[@]}" | tee .jittest/report.json
+
+      - name: Summarize JiTTest report
+        if: always()
+        env:
+          JITTEST_BASE_REF: ${{ inputs['base-ref'] }}
+          JITTEST_HEAD_REF: ${{ inputs['head-ref'] }}
+          JITTEST_WORKFLOW: ${{ inputs.workflow }}
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+
+          const summaryPath = process.env.GITHUB_STEP_SUMMARY;
+          const reportPath = ".jittest/report.json";
+
+          const writeSummary = (markdown) => {
+            fs.appendFileSync(summaryPath, markdown);
+          };
+
+          const tableValue = (value) => {
+            if (value === undefined || value === null || value === "") {
+              return "n/a";
+            }
+
+            return String(value)
+              .replaceAll("|", "\\|")
+              .replace(/\r?\n/g, "<br>");
+          };
+
+          writeSummary("## JiTTest Demo\n\n");
+
+          if (!fs.existsSync(reportPath)) {
+            writeSummary("No JiTTest JSON report was produced.\n");
+            process.exit(0);
+          }
+
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
+          } catch (error) {
+            writeSummary(`Report could not be parsed as JSON: ${error.message}\n`);
+            process.exit(0);
+          }
+
+          const stats = report.stats ?? {};
+          const llmUsage = stats.llmUsage ?? {};
+          const llmBudget = llmUsage.budget ?? {};
+          const rows = [
+            ["Status", report.statusMessage ?? "completed"],
+            ["Base ref", process.env.JITTEST_BASE_REF],
+            ["Head ref", process.env.JITTEST_HEAD_REF],
+            ["Workflow", process.env.JITTEST_WORKFLOW],
+            ["Files analyzed", stats.filesAnalyzed],
+            ["Risk score", stats.diffRiskScore],
+            ["Generated tests", stats.totalTestsGenerated],
+            ["Weak catches", stats.weakCatchCount],
+            ["Reported catches", stats.reportsGenerated],
+            ["Hardening candidates", stats.hardeningCandidateCount],
+            ["Estimated cost", stats.estimatedCost ?? llmUsage.totalCostUsd],
+            ["Total LLM tokens", llmUsage.totalTokens],
+            ["LLM budget status", llmBudget.status],
+            ["Duration", stats.duration],
+          ];
+
+          writeSummary("| Metric | Value |\n| --- | --- |\n");
+          for (const [label, value] of rows) {
+            writeSummary(`| ${label} | ${tableValue(value)} |\n`);
+          }
+
+          const reports = Array.isArray(report.reports) ? report.reports : [];
+          if (reports.length > 0) {
+            writeSummary("\n### Reported Catches\n\n");
+            for (const [index, entry] of reports.entries()) {
+              const title =
+                entry.headline ??
+                entry.title ??
+                entry.summary ??
+                "Behavior change";
+              writeSummary(`${index + 1}. ${tableValue(title)}\n`);
+            }
+          }
+          NODE
+
+      - name: Upload JiTTest artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: jittest-demo-report
+          path: |
+            .jittest/report.json
+            .jittest/assessment-records.jsonl
+          if-no-files-found: warn

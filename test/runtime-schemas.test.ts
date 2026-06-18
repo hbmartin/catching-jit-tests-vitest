@@ -192,6 +192,7 @@ describe("runtime schemas", () => {
       estimatedCost: 0.001,
       llmUsage: {
         callCount: 1,
+        cacheHits: 0,
         totalInputTokens: 10,
         totalOutputTokens: 5,
         totalTokens: 15,

@@ -1,19 +1,34 @@
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { isDirectExecution, runCli } from "../source/cli.js";
+import { cliVersion } from "../source/version.js";
 
-const { runCatchCommandMock } = vi.hoisted(() => ({
+const { runCatchCommandMock, runCalibrateCommandMock } = vi.hoisted(() => ({
   runCatchCommandMock: vi.fn(),
+  runCalibrateCommandMock: vi.fn(),
 }));
 
 vi.mock("../source/commands/catch.js", () => ({
   runCatchCommand: runCatchCommandMock,
 }));
 
-import { runCli } from "../source/cli.js";
-import { cliVersion } from "../source/version.js";
+vi.mock("../source/commands/calibrate.js", () => ({
+  runCalibrateCommand: runCalibrateCommandMock,
+}));
 
 describe("runCli", () => {
   beforeEach(() => {
     runCatchCommandMock.mockReset();
+    runCalibrateCommandMock.mockReset();
   });
 
   it("prints help for empty input", async () => {
@@ -166,7 +181,75 @@ describe("runCli", () => {
     );
   });
 
+  it("dispatches the calibrate command with parsed options", async () => {
+    await runCli([
+      "calibrate",
+      "--feedback-path",
+      "records.jsonl",
+      "--output",
+      "json",
+      "--cwd",
+      "/tmp/repo",
+    ]);
+
+    expect(runCalibrateCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feedbackPath: "records.jsonl",
+        output: "json",
+        cwd: "/tmp/repo",
+      }),
+    );
+  });
+
+  it("prints calibrate help without dispatching the command", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await runCli(["calibrate", "--help"]);
+
+    expect(writeSpy).toHaveBeenCalled();
+    expect(runCalibrateCommandMock).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
   it("throws on unknown commands", async () => {
     await expect(runCli(["unknown"])).rejects.toThrow("Unknown command");
+  });
+});
+
+describe("isDirectExecution", () => {
+  it("matches pnpm-style symlinked package bin paths", () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), "jittest-cli-"));
+    const originalArgv = process.argv;
+
+    try {
+      const realDistDir = path.join(
+        tempDir,
+        ".pnpm",
+        "catching-jit-tests-vitest@0.2.0",
+        "node_modules",
+        "catching-jit-tests-vitest",
+        "dist",
+      );
+      const linkedDistDir = path.join(
+        tempDir,
+        "node_modules",
+        "catching-jit-tests-vitest",
+        "dist",
+      );
+      mkdirSync(realDistDir, { recursive: true });
+      mkdirSync(linkedDistDir, { recursive: true });
+
+      const realEntryPath = path.join(realDistDir, "cli.js");
+      const linkedEntryPath = path.join(linkedDistDir, "cli.js");
+      writeFileSync(realEntryPath, "");
+      symlinkSync(realEntryPath, linkedEntryPath);
+
+      process.argv = [process.execPath, linkedEntryPath];
+
+      expect(isDirectExecution(pathToFileURL(realEntryPath).href)).toBe(true);
+    } finally {
+      process.argv = originalArgv;
+      rmSync(tempDir, { force: true, recursive: true });
+    }
   });
 });

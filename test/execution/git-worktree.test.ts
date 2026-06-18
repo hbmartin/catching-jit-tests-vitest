@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -361,6 +361,111 @@ describe("package manager detection and execution", () => {
       "npm",
       ["exec", "--", "vitest", "run"],
       expect.objectContaining({ cwd: projectDir, timeout: 100 }),
+    );
+  });
+});
+
+describe("installWorktreeDependencies", () => {
+  const created: string[] = [];
+
+  afterEach(async () => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.doUnmock("../../source/utils/process.js");
+    await Promise.all(
+      created.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+    );
+  });
+
+  const makeWorktreePair = async (
+    parentLock: string,
+    childLock: string,
+  ): Promise<{ parentDir: string; childDir: string }> => {
+    const root = await mkdtemp(path.join(tmpdir(), "jittest-wt-"));
+    created.push(root);
+    const parentDir = path.join(root, "parent");
+    const childDir = path.join(root, "child");
+    await mkdir(parentDir, { recursive: true });
+    await mkdir(childDir, { recursive: true });
+
+    for (const dir of [parentDir, childDir]) {
+      await writeFile(
+        path.join(dir, "package.json"),
+        JSON.stringify({ packageManager: "pnpm@11.1.3" }),
+        "utf-8",
+      );
+    }
+    await writeFile(
+      path.join(parentDir, "pnpm-lock.yaml"),
+      parentLock,
+      "utf-8",
+    );
+    await writeFile(path.join(childDir, "pnpm-lock.yaml"), childLock, "utf-8");
+
+    return { parentDir, childDir };
+  };
+
+  const mockRunCommand = async () => {
+    const runCommandMock = vi
+      .fn()
+      .mockResolvedValue({ stdout: "", stderr: "" });
+    vi.doMock("../../source/utils/process.js", async () => {
+      const actual = await vi.importActual<
+        typeof import("../../source/utils/process.js")
+      >("../../source/utils/process.js");
+      return { ...actual, runCommand: runCommandMock };
+    });
+    return runCommandMock;
+  };
+
+  it("installs once and symlinks node_modules when lockfiles match", async () => {
+    const { parentDir, childDir } = await makeWorktreePair("lock-a", "lock-a");
+    await mkdir(path.join(parentDir, "node_modules"), { recursive: true });
+    await writeFile(
+      path.join(parentDir, "node_modules", "marker.txt"),
+      "installed",
+      "utf-8",
+    );
+
+    const runCommandMock = await mockRunCommand();
+    const { installWorktreeDependencies } = await import(
+      "../../source/execution/git-worktree.js"
+    );
+
+    await installWorktreeDependencies(parentDir, childDir, true);
+
+    // Only the parent is installed; the child reuses it via a symlink.
+    expect(runCommandMock).toHaveBeenCalledTimes(1);
+    expect(runCommandMock).toHaveBeenCalledWith(
+      "pnpm",
+      ["install", "--frozen-lockfile"],
+      expect.objectContaining({ cwd: parentDir }),
+    );
+    await expect(
+      readFile(path.join(childDir, "node_modules", "marker.txt"), "utf-8"),
+    ).resolves.toBe("installed");
+  });
+
+  it("installs both worktrees when lockfiles differ", async () => {
+    const { parentDir, childDir } = await makeWorktreePair("lock-a", "lock-b");
+
+    const runCommandMock = await mockRunCommand();
+    const { installWorktreeDependencies } = await import(
+      "../../source/execution/git-worktree.js"
+    );
+
+    await installWorktreeDependencies(parentDir, childDir, false);
+
+    expect(runCommandMock).toHaveBeenCalledTimes(2);
+    expect(runCommandMock).toHaveBeenCalledWith(
+      "pnpm",
+      ["install", "--frozen-lockfile"],
+      expect.objectContaining({ cwd: parentDir }),
+    );
+    expect(runCommandMock).toHaveBeenCalledWith(
+      "pnpm",
+      ["install", "--frozen-lockfile"],
+      expect.objectContaining({ cwd: childDir }),
     );
   });
 });

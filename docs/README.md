@@ -35,6 +35,12 @@ back here.
    failures: empty diffs in shallow checkouts, dependency install
    timeouts, flaky generated tests, worktree leaks, and rate limits.
 
+## Upgrading between versions
+
+- [`upgrade-0.1.0-to-0.2.0.md`](./upgrade-0.1.0-to-0.2.0.md) — migrating off the
+  Anthropic provider onto OpenRouter, the new required model id, and the cost /
+  token budgeting added in 0.2.0.
+
 ## Mental model in one paragraph
 
 `jittest` runs after a diff exists. For each PR it scores risk, asks an LLM

@@ -39,4 +39,14 @@ describe("mapConcurrent", () => {
     const results = await mapConcurrent([], 5, async (x: number) => x);
     expect(results).toEqual([]);
   });
+
+  it("preserves input order even when later items resolve first", async () => {
+    const items = [30, 10, 20];
+    const results = await mapConcurrent(items, 3, async (delay) => {
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      return delay;
+    });
+    // Resolution order is 10, 20, 30, but output order matches input.
+    expect(results).toEqual([30, 10, 20]);
+  });
 });

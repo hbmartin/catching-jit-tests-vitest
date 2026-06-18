@@ -310,12 +310,17 @@ export const llmUsageAuditEventSchema = z.discriminatedUnion("type", [
     model: z.string(),
     reason: z.literal("budget-exhausted"),
   }),
+  z.object({
+    type: z.literal("cache-hit"),
+    model: z.string(),
+  }),
 ]);
 
 export type LLMUsageAuditEvent = z.infer<typeof llmUsageAuditEventSchema>;
 
 export const llmUsageSchema = z.object({
   callCount: z.number().nonnegative(),
+  cacheHits: z.number().nonnegative().default(0),
   totalInputTokens: z.number().nonnegative(),
   totalOutputTokens: z.number().nonnegative(),
   totalTokens: z.number().nonnegative(),

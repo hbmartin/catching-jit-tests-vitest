@@ -1,4 +1,4 @@
-import type { JiTTestConfig } from "../config.js";
+import type { AssessorsConfig, JiTTestConfig } from "../config.js";
 import type { DiffContext } from "../diff/types.js";
 import type { WeakCatch } from "../harvest/types.js";
 import { aggregatedAssessmentSchema } from "../runtime-schemas.js";
@@ -23,20 +23,61 @@ function deriveInferredIntent(weakCatch: WeakCatch, diff: DiffContext): string {
     : "No inferred diff intent was available for this change.";
 }
 
-function scoreToVerdict(score: number): AggregatedAssessment["verdict"] {
-  if (score >= 0.6) {
+function scoreToVerdict(
+  score: number,
+  thresholds: AssessorsConfig["verdictThresholds"],
+): AggregatedAssessment["verdict"] {
+  if (score >= thresholds.strongCatch) {
     return "strong-catch";
   }
-  if (score >= 0.3) {
+  if (score >= thresholds.likelyStrong) {
     return "likely-strong";
   }
-  if (score >= -0.3) {
+  if (score >= thresholds.uncertain) {
     return "uncertain";
   }
-  if (score >= -0.6) {
+  if (score >= thresholds.likelyFalsePositive) {
     return "likely-false-positive";
   }
   return "false-positive";
+}
+
+// Combine the rule-based and LLM scores. A strong, high-confidence
+// false-positive signal from RubFake short-circuits the weighted average so a
+// confident "this test is broken" verdict is not diluted by the judge.
+function combineAssessmentScores(
+  rubfakeResult: Assessment | null,
+  llmEnsembleResult: Assessment | null,
+  assessors: AssessorsConfig,
+): number {
+  if (rubfakeResult && llmEnsembleResult) {
+    const hasHighConfidenceFP = rubfakeResult.detectedPatterns.some(
+      (p) => p.confidence === "high" && p.direction === "false-positive",
+    );
+    if (
+      rubfakeResult.score <= assessors.rubfakeOverrideScore &&
+      hasHighConfidenceFP
+    ) {
+      return rubfakeResult.score;
+    }
+    // Clamp: configurable weights need not sum to 1, but combinedScore must
+    // stay within [-1, 1] to satisfy aggregatedAssessmentSchema.
+    return Math.max(
+      -1,
+      Math.min(
+        1,
+        rubfakeResult.score * assessors.rubfakeWeight +
+          llmEnsembleResult.score * assessors.llmWeight,
+      ),
+    );
+  }
+  if (rubfakeResult) {
+    return rubfakeResult.score;
+  }
+  if (llmEnsembleResult) {
+    return llmEnsembleResult.score;
+  }
+  return 0;
 }
 
 function estimateDismissalDifficulty(
@@ -108,39 +149,19 @@ async function assessWeakCatch(
     assessments.push(llmEnsembleResult);
   }
 
-  let combinedScore = 0;
-  if (rubfakeResult && llmEnsembleResult) {
-    const hasHighConfidenceFP = rubfakeResult.detectedPatterns.some(
-      (p) => p.confidence === "high" && p.direction === "false-positive",
-    );
-    if (rubfakeResult.score <= -0.8 && hasHighConfidenceFP) {
-      combinedScore = rubfakeResult.score;
-    } else {
-      combinedScore = rubfakeResult.score * 0.4 + llmEnsembleResult.score * 0.6;
-    }
-  } else if (rubfakeResult) {
-    combinedScore = rubfakeResult.score;
-  } else if (llmEnsembleResult) {
-    combinedScore = llmEnsembleResult.score;
-  } else {
-    combinedScore = 0;
-  }
+  const { assessors } = config;
+  const combinedScore = combineAssessmentScores(
+    rubfakeResult,
+    llmEnsembleResult,
+    assessors,
+  );
 
   const dismissalDifficulty = estimateDismissalDifficulty(weakCatch);
-  const verdict = scoreToVerdict(combinedScore);
+  const verdict = scoreToVerdict(combinedScore, assessors.verdictThresholds);
 
-  const thresholdMap: Record<
-    AggregatedAssessment["dismissalDifficulty"],
-    number
-  > = {
-    trivial: -0.2,
-    easy: 0.0,
-    moderate: 0.3,
-    hard: 0.5,
-  };
   const reportThreshold = Math.max(
     config.reportThreshold,
-    thresholdMap[dismissalDifficulty],
+    assessors.dismissalThresholds[dismissalDifficulty],
   );
 
   return aggregatedAssessmentSchema.parse({
@@ -152,4 +173,9 @@ async function assessWeakCatch(
   });
 }
 
-export { assessWeakCatch, estimateDismissalDifficulty, scoreToVerdict };
+export {
+  assessWeakCatch,
+  combineAssessmentScores,
+  estimateDismissalDifficulty,
+  scoreToVerdict,
+};
