@@ -9,24 +9,38 @@ afterEach(() => {
 
 describe("logger", () => {
   it("filters messages below the current log level", () => {
-    const debugSpy = vi
-      .spyOn(console, "debug")
-      .mockImplementation(() => undefined);
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
 
     logger.debug("hidden");
 
-    expect(debugSpy).not.toHaveBeenCalled();
+    expect(stderrSpy).not.toHaveBeenCalled();
   });
 
-  it("emits debug messages when the level allows them", () => {
-    const debugSpy = vi
-      .spyOn(console, "debug")
-      .mockImplementation(() => undefined);
+  it("emits debug messages to stderr when the level allows them", () => {
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
 
     logger.setLevel("debug");
     logger.debug("visible");
 
-    expect(debugSpy.mock.calls[0]?.[0]).toContain("[DEBUG] visible");
+    expect(stderrSpy.mock.calls[0]?.[0]).toContain("[DEBUG] visible");
+  });
+
+  it("emits info messages to stderr, not stdout", () => {
+    const stderrSpy = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+    const stdoutSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    logger.info("hello");
+
+    expect(stderrSpy.mock.calls[0]?.[0]).toContain("[INFO] hello");
+    expect(stdoutSpy).not.toHaveBeenCalled();
   });
 
   it("emits error messages at warn level", () => {

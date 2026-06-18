@@ -33,11 +33,14 @@ interface CacheKeyInput {
   // JSON, and schema-bound JSON so they never collide on an identical prompt.
   readonly outputKind: string;
   readonly schemaFingerprint?: string;
+  // Serialized provider-specific options (e.g. OpenRouter reasoning settings).
+  // These can change the response, so they must be part of the key.
+  readonly providerOptions?: string;
 }
 
 // Content-addressed key over everything that can change the response. A change
-// to the prompt, model, decoding params, output mode, or JSON schema produces a
-// different key, so stale entries are never served.
+// to the prompt, model, decoding params, output mode, JSON schema, or provider
+// options produces a different key, so stale entries are never served.
 function computeCacheKey(input: CacheKeyInput): string {
   return createHash("sha256")
     .update(
@@ -49,6 +52,7 @@ function computeCacheKey(input: CacheKeyInput): string {
         temperature: input.temperature,
         outputKind: input.outputKind,
         schemaFingerprint: input.schemaFingerprint ?? "",
+        providerOptions: input.providerOptions ?? "",
       }),
     )
     .digest("hex");
