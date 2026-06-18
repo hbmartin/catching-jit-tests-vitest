@@ -771,6 +771,74 @@ describe("LLMClient", () => {
     expect(new Set(cacheKeys).size).toBe(2);
   });
 
+  it("passes through generic provider options and includes them in cache keys", async () => {
+    const { provider } = makeProvider();
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "provider-specific body",
+        inputTokens: 9,
+        outputTokens: 6,
+        costUsd: 0.003,
+      }),
+    );
+
+    const store = new Map<string, unknown>();
+    const cache = {
+      get: vi.fn(async (key: string) => store.get(key)),
+      set: vi.fn(async (key: string, value: unknown) => {
+        store.set(key, value);
+      }),
+    };
+
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+    const fastProviderClient = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+        providerOptions: {
+          custom: { routing: "fast" },
+          openrouter: {},
+        },
+        cache: cache as never,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+    const qualityProviderClient = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+        providerOptions: {
+          custom: { routing: "quality" },
+        },
+        cache: cache as never,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+
+    await fastProviderClient.complete({ prompt: "same prompt" });
+    await qualityProviderClient.complete({ prompt: "same prompt" });
+
+    expect(generateTextMock.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        providerOptions: { custom: { routing: "fast" } },
+      }),
+    );
+    expect(generateTextMock.mock.calls[1]?.[0]).toEqual(
+      expect.objectContaining({
+        providerOptions: { custom: { routing: "quality" } },
+      }),
+    );
+
+    const cacheKeys = cache.set.mock.calls.map(([key]) => key);
+    expect(new Set(cacheKeys).size).toBe(2);
+  });
+
   it("uses the same cache key for absent and empty provider options", async () => {
     const { provider } = makeProvider();
     const generateTextMock = vi.fn().mockResolvedValue(
@@ -807,7 +875,7 @@ describe("LLMClient", () => {
         apiKey: "",
         model: "openai/gpt-4.1",
         maxTokens: 100,
-        providerOptions: {},
+        providerOptions: { custom: undefined, openrouter: {} },
         cache: cache as never,
       },
       provider as never,

@@ -3,6 +3,8 @@ import path from "node:path";
 
 import { z } from "zod";
 
+import { logger } from "./utils/logger.js";
+
 const workflowSchema = z.enum(["dodgy-diff", "intent-aware", "both"]);
 const outputFormatSchema = z.enum(["github-comment", "json", "console"]);
 const defaultIncludePatterns = ["src/**/*.ts", "source/**/*.ts"];
@@ -73,9 +75,7 @@ const jitTestConfigSchema = z.object({
     apiKey: z.string().default(""),
     maxTokens: z.number().int().positive().default(4096),
     providerOptions: z
-      .object({
-        openrouter: z.record(z.string(), z.unknown()).optional(),
-      })
+      .record(z.string(), z.record(z.string(), z.unknown()))
       .default({}),
     budget: z
       .object({
@@ -191,10 +191,45 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function pruneUndefined(
   input: Record<string, unknown>,
 ): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(input).filter(([, value]) => value !== undefined),
+  );
+}
+
+// Dropped during merges to keep a crafted config file from reaching an object's
+// prototype via a "__proto__"/"constructor"/"prototype" key.
+const FORBIDDEN_MERGE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+// A leaf where a higher-precedence layer (CLI) replaced a different value the
+// config file had already set. Surfaced as a warning so the override is visible.
+interface MergeConflict {
+  readonly path: string;
+  readonly from: unknown;
+  readonly to: unknown;
+}
+
+function formatOverrideValue(value: unknown): string {
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return String(value);
+  }
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function sanitizeMergeRecord(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(input)) {
-    if (value !== undefined) {
-      result[key] = value;
+    if (!FORBIDDEN_MERGE_KEYS.has(key)) {
+      result[key] = isRecord(value) ? sanitizeMergeRecord(value) : value;
     }
   }
   return result;
@@ -203,14 +238,34 @@ function pruneUndefined(
 function mergeRecords(
   base: Record<string, unknown>,
   overrides: Record<string, unknown>,
+  pathPrefix: string,
+  conflicts: MergeConflict[],
 ): Record<string, unknown> {
-  const result = { ...base };
-  for (const [key, overrideValue] of Object.entries(overrides)) {
-    const baseValue = result[key];
-    result[key] =
-      isRecord(baseValue) && isRecord(overrideValue)
-        ? mergeRecords(baseValue, overrideValue)
-        : overrideValue;
+  const result = sanitizeMergeRecord(base);
+  const safeOverrides = sanitizeMergeRecord(overrides);
+  for (const [key, overrideValue] of Object.entries(safeOverrides)) {
+    if (overrideValue !== undefined) {
+      const baseValue = result[key];
+      const keyPath = pathPrefix.length > 0 ? `${pathPrefix}.${key}` : key;
+      if (isRecord(baseValue) && isRecord(overrideValue)) {
+        result[key] = mergeRecords(
+          baseValue,
+          overrideValue,
+          keyPath,
+          conflicts,
+        );
+      } else {
+        // An add (no prior file value) is not an override; only a genuine,
+        // differing replacement is worth warning about.
+        if (
+          baseValue !== undefined &&
+          JSON.stringify(baseValue) !== JSON.stringify(overrideValue)
+        ) {
+          conflicts.push({ path: keyPath, from: baseValue, to: overrideValue });
+        }
+        result[key] = overrideValue;
+      }
+    }
   }
   return result;
 }
@@ -219,15 +274,22 @@ function mergeNestedRecord(
   base: Record<string, unknown>,
   overrides: Record<string, unknown>,
   key: string,
+  conflicts: MergeConflict[],
 ): unknown {
   const baseValue = base[key];
   const overrideValue = overrides[key];
 
-  if (isRecord(baseValue) && isRecord(overrideValue)) {
-    return mergeRecords(baseValue, overrideValue);
+  if (overrideValue === undefined) {
+    return isRecord(baseValue) ? sanitizeMergeRecord(baseValue) : baseValue;
   }
 
-  return overrideValue ?? baseValue;
+  if (isRecord(baseValue) && isRecord(overrideValue)) {
+    return mergeRecords(baseValue, overrideValue, `llm.${key}`, conflicts);
+  }
+
+  return isRecord(overrideValue)
+    ? sanitizeMergeRecord(overrideValue)
+    : overrideValue;
 }
 
 function readConfigFileAt(filePath: string): Record<string, unknown> {
@@ -330,6 +392,7 @@ function loadConfig(
   const fileApiKeyValue = fileLlm["apiKey"];
   const fileApiKey = typeof fileApiKeyValue === "string" ? fileApiKeyValue : "";
 
+  const conflicts: MergeConflict[] = [];
   const base = {
     ...fileRest,
     ...pruneUndefined(restOverrides),
@@ -344,10 +407,18 @@ function loadConfig(
         fileLlm,
         llmOverrides,
         "providerOptions",
+        conflicts,
       ),
-      budget: mergeNestedRecord(fileLlm, llmOverrides, "budget"),
+      budget: mergeNestedRecord(fileLlm, llmOverrides, "budget", conflicts),
     },
   };
+
+  for (const { path: conflictPath, from, to } of conflicts) {
+    logger.warn(
+      `${conflictPath}: ${formatOverrideValue(from)} -> ${formatOverrideValue(to)}`,
+    );
+  }
+
   return jitTestConfigSchema.parse(base);
 }
 

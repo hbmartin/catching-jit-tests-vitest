@@ -8,7 +8,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GeneratedTest } from "../../source/generation/types.js";
 
@@ -20,6 +20,10 @@ async function makeTempDir(prefix: string): Promise<string> {
   await mkdir(testTempRoot, { recursive: true });
   return mkdtemp(path.join(testTempRoot, prefix));
 }
+
+afterAll(async () => {
+  await rm(testTempRoot, { recursive: true, force: true });
+});
 
 function makeTest(
   testFilePath: string,

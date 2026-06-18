@@ -49,9 +49,9 @@ interface LLMResponse {
   };
 }
 
-interface LLMProviderOptions {
-  readonly openrouter?: Record<string, unknown>;
-}
+type LLMProviderOptions = Readonly<
+  Record<string, Record<string, unknown> | undefined>
+>;
 
 interface LLMBudgetConfig {
   readonly maxCostUsd?: number;
@@ -412,29 +412,41 @@ function schemaFingerprint(schema: ZodType<unknown>): string {
   }
 }
 
-function createProviderOptions(
+function activeProviderOptions(
   providerOptions: LLMProviderOptions | undefined,
-): GenerateTextOptions["providerOptions"] {
-  if (providerOptions?.openrouter === undefined) {
+): Record<string, Record<string, unknown>> | undefined {
+  if (providerOptions === undefined) {
     return;
   }
 
-  return {
-    openrouter: providerOptions.openrouter,
-  } as GenerateTextOptions["providerOptions"];
+  const activeEntries = Object.entries(providerOptions).filter(
+    (entry): entry is [string, Record<string, unknown>] =>
+      isRecord(entry[1]) && Object.keys(entry[1]).length > 0,
+  );
+  if (activeEntries.length === 0) {
+    return;
+  }
+
+  return Object.fromEntries(activeEntries);
+}
+
+function createProviderOptions(
+  providerOptions: LLMProviderOptions | undefined,
+): GenerateTextOptions["providerOptions"] {
+  return activeProviderOptions(
+    providerOptions,
+  ) as GenerateTextOptions["providerOptions"];
 }
 
 function serializeProviderOptions(
   providerOptions: LLMProviderOptions | undefined,
 ): string | undefined {
-  if (
-    providerOptions?.openrouter === undefined ||
-    Object.keys(providerOptions.openrouter).length === 0
-  ) {
+  const activeOptions = activeProviderOptions(providerOptions);
+  if (activeOptions === undefined) {
     return;
   }
 
-  return JSON.stringify(providerOptions);
+  return JSON.stringify(activeOptions);
 }
 
 class LLMClient {
