@@ -1,3 +1,4 @@
+import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import {
   createOpenRouter,
   type OpenRouterProvider,
@@ -5,13 +6,30 @@ import {
 } from "@openrouter/ai-sdk-provider";
 import {
   generateText,
+  type LanguageModel,
   type LanguageModelUsage,
   Output,
   type ProviderMetadata,
 } from "ai";
-import type { ZodType } from "zod";
+import { type ZodType, z } from "zod";
 
+import type { CachedLLMResult, LLMCache } from "./llm-cache.js";
+import { computeCacheKey } from "./llm-cache.js";
 import { logger } from "./logger.js";
+
+type LLMProvider = "openrouter" | "openai-compatible";
+
+// Resolves a model id to an AI SDK LanguageModel. Code/library users can inject
+// their own factory (or a fully-resolved model) to use any AI SDK provider; the
+// CLI builds one from provider config.
+type ModelFactory = (modelId: string) => LanguageModel;
+
+// Describes the output mode of a request so cache keys never collide across
+// plain-text, freeform-JSON, and schema-bound-JSON variants of one prompt.
+interface CacheDescriptor {
+  readonly kind: "text" | "json" | "object";
+  readonly schemaFingerprint?: string;
+}
 
 interface LLMRequest {
   readonly prompt: string;
@@ -44,9 +62,27 @@ interface LLMClientConfig {
   readonly apiKey?: string;
   readonly model: string;
   readonly maxTokens: number;
-  readonly provider?: "openrouter";
+  readonly provider?: LLMProvider;
+  readonly baseUrl?: string;
   readonly providerOptions?: LLMProviderOptions;
   readonly budget?: LLMBudgetConfig;
+  /**
+   * A fully-resolved AI SDK model. When supplied, the built-in provider
+   * machinery (and the API-key requirement) is bypassed entirely — this is the
+   * seam for library users who want to bring their own AI SDK provider.
+   */
+  readonly languageModel?: LanguageModel;
+  /**
+   * A factory that resolves a model id to an AI SDK model. Preferred over
+   * `languageModel` when the caller needs `withModel` to swap models (e.g. a
+   * judge ensemble across several model ids).
+   */
+  readonly modelFactory?: ModelFactory;
+  /**
+   * Optional response cache. When supplied, identical requests are served from
+   * the cache and recorded as zero-cost cache hits.
+   */
+  readonly cache?: LLMCache;
 }
 
 type BudgetExhaustedReason = "tokens" | "cost";
@@ -80,6 +116,10 @@ type LLMAuditEvent =
       readonly type: "llm-skipped";
       readonly model: string;
       readonly reason: "budget-exhausted";
+    }
+  | {
+      readonly type: "cache-hit";
+      readonly model: string;
     };
 
 interface LLMModelUsageSummary {
@@ -94,6 +134,7 @@ interface LLMModelUsageSummary {
 
 interface LLMUsageSummary {
   readonly callCount: number;
+  readonly cacheHits: number;
   readonly totalInputTokens: number;
   readonly totalOutputTokens: number;
   readonly totalTokens: number;
@@ -123,6 +164,7 @@ interface TokenUsage {
 
 interface SharedLLMStats {
   callCount: number;
+  cacheHits: number;
   totalInputTokens: number;
   totalOutputTokens: number;
   totalTokens: number;
@@ -160,27 +202,86 @@ function isLLMBudgetExhaustedError(
   return error instanceof LLMBudgetExhaustedError;
 }
 
-function createProvider(config: LLMClientConfig): OpenRouterProvider {
+type ResolvedProvider =
+  | OpenRouterProvider
+  | ReturnType<typeof createOpenAICompatible>;
+
+function createProvider(config: LLMClientConfig): ResolvedProvider {
   const provider = config.provider ?? "openrouter";
-  if (provider !== "openrouter") {
-    throw new Error(`Unsupported LLM provider: ${String(provider)}`);
+
+  if (provider === "openrouter") {
+    if (config.apiKey === undefined || config.apiKey.trim().length === 0) {
+      throw new Error(
+        "An OpenRouter API key is required. Set OPENROUTER_API_KEY.",
+      );
+    }
+
+    return createOpenRouter({
+      apiKey: config.apiKey,
+      compatibility: "strict",
+    });
   }
 
-  if (config.apiKey === undefined || config.apiKey.trim().length === 0) {
+  if (provider === "openai-compatible") {
+    if (config.baseUrl === undefined || config.baseUrl.trim().length === 0) {
+      throw new Error(
+        "A base URL is required for the openai-compatible provider. Set --llm-base-url or LLM_BASE_URL.",
+      );
+    }
+
+    const apiKey =
+      config.apiKey !== undefined && config.apiKey.trim().length > 0
+        ? config.apiKey
+        : undefined;
+
+    return createOpenAICompatible({
+      name: "jittest",
+      baseURL: config.baseUrl,
+      ...(apiKey === undefined ? {} : { apiKey }),
+    });
+  }
+
+  throw new Error(`Unsupported LLM provider: ${provider}`);
+}
+
+// Turns the configured/injected provider into a uniform model resolver.
+// Library-supplied models and factories take precedence over the built-in
+// provider machinery.
+function deriveModelFactory(
+  config: LLMClientConfig,
+  provider: ResolvedProvider | undefined,
+): ModelFactory {
+  if (config.languageModel !== undefined) {
+    const injected = config.languageModel;
+    return () => injected;
+  }
+
+  if (config.modelFactory !== undefined) {
+    return config.modelFactory;
+  }
+
+  if (provider === undefined) {
     throw new Error(
-      "An OpenRouter API key is required. Set OPENROUTER_API_KEY.",
+      "No LLM provider, languageModel, or modelFactory supplied.",
     );
   }
 
-  return createOpenRouter({
-    apiKey: config.apiKey,
-    compatibility: "strict",
-  });
+  const providerName = config.provider ?? "openrouter";
+  if (providerName === "openrouter") {
+    const openrouter = provider as OpenRouterProvider;
+    return (modelId) => openrouter.chat(modelId, { usage: { include: true } });
+  }
+
+  const openaiCompatible = provider as ReturnType<
+    typeof createOpenAICompatible
+  >;
+  return (modelId) => openaiCompatible(modelId);
 }
 
 function createStats(budget: LLMBudgetConfig = {}): SharedLLMStats {
   return {
     callCount: 0,
+    cacheHits: 0,
     totalInputTokens: 0,
     totalOutputTokens: 0,
     totalTokens: 0,
@@ -208,19 +309,19 @@ function getOpenRouterUsage(
   providerMetadata: ProviderMetadata | undefined,
 ): OpenRouterUsageAccounting | undefined {
   if (!isRecord(providerMetadata)) {
-    return undefined;
+    return;
   }
 
   const { openrouter: openrouterMetadata } = providerMetadata as {
     openrouter?: unknown;
   };
   if (!isRecord(openrouterMetadata)) {
-    return undefined;
+    return;
   }
 
   const { usage } = openrouterMetadata as { usage?: unknown };
   if (!isRecord(usage)) {
-    return undefined;
+    return;
   }
 
   const usageRecord = usage as {
@@ -237,7 +338,7 @@ function getOpenRouterUsage(
     completionTokens === undefined ||
     totalTokens === undefined
   ) {
-    return undefined;
+    return;
   }
 
   return {
@@ -272,11 +373,49 @@ function normalizeUsage(input: {
   };
 }
 
+// Rebuild a generateText-shaped result from a cache entry. The usage is encoded
+// as OpenRouter provider metadata so `normalizeUsage` recovers the exact cached
+// token/cost numbers regardless of which provider originally produced them.
+function reconstructCachedResult(
+  cached: CachedLLMResult,
+): GenerateTextResultValue {
+  const { usage } = cached;
+  return {
+    text: cached.text,
+    output: cached.output,
+    totalUsage: {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      totalTokens: usage.totalTokens,
+    },
+    providerMetadata: {
+      openrouter: {
+        usage: {
+          promptTokens: usage.inputTokens,
+          completionTokens: usage.outputTokens,
+          totalTokens: usage.totalTokens,
+          ...(usage.costUsd === undefined ? {} : { cost: usage.costUsd }),
+        },
+      },
+    },
+  } as unknown as GenerateTextResultValue;
+}
+
+function schemaFingerprint(schema: ZodType<unknown>): string {
+  try {
+    return JSON.stringify(z.toJSONSchema(schema));
+  } catch {
+    // Some schemas (e.g. with custom refinements) cannot be serialized to JSON
+    // Schema; fall back to a stable-but-coarse marker rather than failing.
+    return "unserializable-schema";
+  }
+}
+
 function createProviderOptions(
   providerOptions: LLMProviderOptions | undefined,
 ): GenerateTextOptions["providerOptions"] {
   if (providerOptions?.openrouter === undefined) {
-    return undefined;
+    return;
   }
 
   return {
@@ -289,14 +428,19 @@ class LLMClient {
   private readonly model: string;
   private readonly defaultMaxTokens: number;
   private readonly providerName: LLMClientConfig["provider"];
+  private readonly baseUrl: string | undefined;
   private readonly providerOptions: LLMProviderOptions | undefined;
-  private readonly provider: OpenRouterProvider;
+  private readonly provider: ResolvedProvider | undefined;
+  private readonly languageModel: LanguageModel | undefined;
+  private readonly injectedModelFactory: ModelFactory | undefined;
+  private readonly modelFactory: ModelFactory;
+  private readonly cache: LLMCache | undefined;
   private readonly stats: SharedLLMStats;
   private readonly generateText: GenerateTextFn;
 
   constructor(
     config: LLMClientConfig,
-    provider: OpenRouterProvider = createProvider(config),
+    provider?: ResolvedProvider,
     stats: SharedLLMStats = createStats(config.budget),
     generateTextFn: GenerateTextFn = generateText as GenerateTextFn,
   ) {
@@ -306,12 +450,22 @@ class LLMClient {
       );
     }
 
+    const hasInjection =
+      config.languageModel !== undefined || config.modelFactory !== undefined;
+    const resolvedProvider =
+      provider ?? (hasInjection ? undefined : createProvider(config));
+
     this.apiKey = config.apiKey;
     this.model = config.model;
     this.defaultMaxTokens = config.maxTokens;
     this.providerName = config.provider;
+    this.baseUrl = config.baseUrl;
     this.providerOptions = config.providerOptions;
-    this.provider = provider;
+    this.languageModel = config.languageModel;
+    this.injectedModelFactory = config.modelFactory;
+    this.provider = resolvedProvider;
+    this.modelFactory = deriveModelFactory(config, resolvedProvider);
+    this.cache = config.cache;
     this.stats = stats;
     this.generateText = generateTextFn;
   }
@@ -418,8 +572,31 @@ class LLMClient {
     this.checkBudgetAfterCall(callNumber);
   }
 
+  private recordCacheHit(): void {
+    this.stats.cacheHits += 1;
+    this.stats.events.push({ type: "cache-hit", model: this.model });
+  }
+
+  private cacheKeyFor(
+    request: LLMRequest,
+    maxTokens: number,
+    temperature: number,
+    descriptor: CacheDescriptor,
+  ): string {
+    return computeCacheKey({
+      model: this.model,
+      prompt: request.prompt,
+      system: request.systemPrompt,
+      maxTokens,
+      temperature,
+      outputKind: descriptor.kind,
+      schemaFingerprint: descriptor.schemaFingerprint,
+    });
+  }
+
   private async runGenerate(
     request: LLMRequest,
+    descriptor: CacheDescriptor,
     output?: unknown,
   ): Promise<GenerateTextResultValue> {
     this.assertBudgetAvailable();
@@ -427,12 +604,25 @@ class LLMClient {
     const maxTokens = request.maxTokens ?? this.defaultMaxTokens;
     const temperature = request.temperature ?? 0;
 
+    const cacheKey = this.cache
+      ? this.cacheKeyFor(request, maxTokens, temperature, descriptor)
+      : undefined;
+
+    if (this.cache && cacheKey !== undefined) {
+      const cached = await this.cache.get(cacheKey);
+      if (cached !== undefined) {
+        logger.debug(`LLM cache hit for ${this.model}`);
+        this.recordCacheHit();
+        return reconstructCachedResult(cached);
+      }
+    }
+
     logger.debug(
       `LLM call #${String(this.stats.callCount + 1)} to ${this.model} (max ${String(maxTokens)} output tokens)`,
     );
 
     const result = await this.generateText({
-      model: this.provider.chat(this.model, { usage: { include: true } }),
+      model: this.modelFactory(this.model),
       maxOutputTokens: maxTokens,
       temperature,
       prompt: request.prompt,
@@ -441,18 +631,25 @@ class LLMClient {
       ...(output === undefined ? {} : { output }),
     } as GenerateTextOptions);
 
-    this.recordUsage(
-      normalizeUsage({
-        usage: result.totalUsage,
-        providerMetadata: result.providerMetadata,
-      }),
-    );
+    const usage = normalizeUsage({
+      usage: result.totalUsage,
+      providerMetadata: result.providerMetadata,
+    });
+    this.recordUsage(usage);
+
+    if (this.cache && cacheKey !== undefined) {
+      await this.cache.set(cacheKey, {
+        text: result.text,
+        output: result.output,
+        usage,
+      });
+    }
 
     return result;
   }
 
   async complete(request: LLMRequest): Promise<LLMResponse> {
-    const result = await this.runGenerate(request);
+    const result = await this.runGenerate(request, { kind: "text" });
 
     return {
       content: result.text.trim(),
@@ -464,8 +661,12 @@ class LLMClient {
   }
 
   async completeJson<T>(request: LLMRequest, schema?: ZodType<T>): Promise<T> {
+    const descriptor: CacheDescriptor = schema
+      ? { kind: "object", schemaFingerprint: schemaFingerprint(schema) }
+      : { kind: "json" };
     const result = await this.runGenerate(
       request,
+      descriptor,
       schema ? Output.object({ schema: schema as never }) : Output.json(),
     );
 
@@ -477,14 +678,28 @@ class LLMClient {
       return this;
     }
 
+    if (this.languageModel !== undefined) {
+      logger.warn(
+        `An injected languageModel cannot be swapped; "${model}" will reuse the injected model. Pass modelFactory instead to vary models.`,
+      );
+    }
+
     return new LLMClient(
       {
         apiKey: this.apiKey,
         model,
         maxTokens: this.defaultMaxTokens,
         provider: this.providerName,
+        baseUrl: this.baseUrl,
         providerOptions: this.providerOptions,
         budget: this.stats.budget,
+        ...(this.languageModel === undefined
+          ? {}
+          : { languageModel: this.languageModel }),
+        ...(this.injectedModelFactory === undefined
+          ? {}
+          : { modelFactory: this.injectedModelFactory }),
+        ...(this.cache === undefined ? {} : { cache: this.cache }),
       },
       this.provider,
       this.stats,
@@ -516,6 +731,7 @@ class LLMClient {
 
     const llmUsage: LLMUsageSummary = {
       callCount: this.stats.callCount,
+      cacheHits: this.stats.cacheHits,
       totalInputTokens: this.stats.totalInputTokens,
       totalOutputTokens: this.stats.totalOutputTokens,
       totalTokens: this.stats.totalTokens,
@@ -546,13 +762,16 @@ class LLMClient {
   }
 }
 
+export type { CachedLLMResult, LLMCache } from "./llm-cache.js";
 export type {
   LLMAuditEvent,
   LLMBudgetConfig,
   LLMClientConfig,
+  LLMProvider,
   LLMProviderOptions,
   LLMRequest,
   LLMResponse,
   LLMUsageSummary,
+  ModelFactory,
 };
 export { isLLMBudgetExhaustedError, LLMBudgetExhaustedError, LLMClient };

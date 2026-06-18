@@ -8,11 +8,12 @@ import { extractDiffContext } from "../diff/extractor.js";
 import { applyRiskAnalysis } from "../diff/risk-scorer.js";
 import type { DiffContext } from "../diff/types.js";
 import {
-  installDependencies,
+  installWorktreeDependencies,
   setupWorktrees,
 } from "../execution/git-worktree.js";
 import {
   dualExecution,
+  flakeGuardTests,
   validateIntentAwareTests,
 } from "../execution/runner.js";
 import {
@@ -34,6 +35,8 @@ import { formatPRComment } from "../reporting/github-comment.js";
 import { formatJsonReport } from "../reporting/json-report.js";
 import type { BehaviorReport, RunStats } from "../reporting/types.js";
 import { runStatsSchema } from "../runtime-schemas.js";
+import { mapConcurrent } from "../utils/concurrency.js";
+import { DiskLLMCache } from "../utils/llm-cache.js";
 import { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
 
@@ -54,29 +57,71 @@ const writeStdout = (value: string): void => {
   process.stdout.write(`${value}\n`);
 };
 
-const createCommandConfig = (options: CatchCommandOptions) =>
-  loadConfig({
-    workflow: options.workflow,
-    riskThreshold: options.riskThreshold,
-    testsPerFunction: options.testsPerFunction,
-    maxTotalTests: options.maxTotalTests,
-    batchSize: options.batchSize,
-    parallelWorktrees: options.parallelWorktrees,
-    testTimeout: options.timeout,
-    outputFormat: options.output,
-    reportThreshold: options.reportThreshold,
-    feedbackPath: options.feedbackPath,
-    contextFiles: options.contextFiles,
-    include: options.include,
-    exclude: options.exclude,
-    llm: {
-      ...(options.llmModel === undefined ? {} : { model: options.llmModel }),
-      budget: {
-        maxCostUsd: options.maxCostUsd,
-        maxTokens: options.maxTokens,
+// Only include nested overrides (cache, llm.budget) when the user actually set
+// a flag. Always emitting them would shallow-overwrite the corresponding
+// jittest.config.json blocks with empty/default objects.
+const buildCacheOverride = (
+  options: CatchCommandOptions,
+): Record<string, unknown> | undefined => {
+  if (options.noCache === undefined && options.cacheDir === undefined) {
+    return;
+  }
+  return {
+    ...(options.noCache === undefined ? {} : { enabled: !options.noCache }),
+    ...(options.cacheDir === undefined ? {} : { dir: options.cacheDir }),
+  };
+};
+
+const buildBudgetOverride = (
+  options: CatchCommandOptions,
+): Record<string, unknown> | undefined => {
+  if (options.maxCostUsd === undefined && options.maxTokens === undefined) {
+    return;
+  }
+  return {
+    ...(options.maxCostUsd === undefined
+      ? {}
+      : { maxCostUsd: options.maxCostUsd }),
+    ...(options.maxTokens === undefined
+      ? {}
+      : { maxTokens: options.maxTokens }),
+  };
+};
+
+const createCommandConfig = (options: CatchCommandOptions) => {
+  const budget = buildBudgetOverride(options);
+  return loadConfig(
+    {
+      workflow: options.workflow,
+      riskThreshold: options.riskThreshold,
+      testsPerFunction: options.testsPerFunction,
+      maxTotalTests: options.maxTotalTests,
+      batchSize: options.batchSize,
+      parallelWorktrees: options.parallelWorktrees,
+      assessConcurrency: options.assessConcurrency,
+      flakeGuardRuns: options.flakeGuardRuns,
+      testTimeout: options.timeout,
+      outputFormat: options.output,
+      reportThreshold: options.reportThreshold,
+      feedbackPath: options.feedbackPath,
+      contextFiles: options.contextFiles,
+      include: options.include,
+      exclude: options.exclude,
+      cache: buildCacheOverride(options),
+      llm: {
+        ...(options.llmModel === undefined ? {} : { model: options.llmModel }),
+        ...(options.llmProvider === undefined
+          ? {}
+          : { provider: options.llmProvider }),
+        ...(options.llmBaseUrl === undefined
+          ? {}
+          : { baseUrl: options.llmBaseUrl }),
+        ...(budget === undefined ? {} : { budget }),
       },
     },
-  });
+    { cwd: options.cwd, configPath: options.configPath },
+  );
+};
 
 const createResult = (
   options: CatchCommandOptions,
@@ -260,20 +305,38 @@ const executeInWorktrees = async (input: {
   );
 
   try {
-    if (input.config.parallelWorktrees) {
-      await Promise.all([
-        installDependencies(worktrees.parentDir),
-        installDependencies(worktrees.childDir),
-      ]);
-    } else {
-      await installDependencies(worktrees.parentDir);
-      await installDependencies(worktrees.childDir);
+    await installWorktreeDependencies(
+      worktrees.parentDir,
+      worktrees.childDir,
+      input.config.parallelWorktrees,
+    );
+
+    let candidateTests = input.allTests;
+    if (input.config.flakeGuardRuns > 1) {
+      logger.info(
+        `Flake-guarding ${String(input.allTests.length)} tests over ${String(
+          input.config.flakeGuardRuns,
+        )} parent runs...`,
+      );
+      const { stableTests, droppedCount } = await flakeGuardTests(
+        input.allTests,
+        worktrees.parentDir,
+        input.config.testTimeout,
+        input.config.flakeGuardRuns,
+        input.config.batchSize,
+      );
+      if (droppedCount > 0) {
+        logger.warn(
+          `Flake guard dropped ${String(droppedCount)} unstable test(s) before dual execution`,
+        );
+      }
+      candidateTests = stableTests;
     }
 
-    let executableTests = input.allTests;
+    let executableTests = candidateTests;
     try {
       executableTests = await validateIntentAwareTests(
-        input.allTests,
+        candidateTests,
         worktrees.parentDir,
         input.config.testTimeout,
       );
@@ -367,37 +430,54 @@ const assessWeakCatches = async (input: {
   assessMs: number;
 }> => {
   const assessStart = Date.now();
-  const reports: BehaviorReport[] = [];
 
-  for (const weakCatch of input.weakCatches) {
-    const recordedAt = new Date().toISOString();
-    const assessmentConfig = input.llm.isBudgetExhausted()
-      ? { ...input.config, llmJudgeEnabled: false }
-      : input.config;
-    const assessment = await assessWeakCatch(
-      weakCatch,
-      input.diff,
-      selectAssessmentExecutionLog(
-        weakCatch.executionLog,
-        weakCatch.childResult.failureMessage,
-      ),
-      input.llm,
-      assessmentConfig,
-    );
-    await recordAssessmentFeedback({
-      options: input.options,
-      config: input.config,
-      runId: input.runId,
-      recordedAt,
-      diff: input.diff,
-      weakCatch,
-      assessment,
-    });
+  // Feedback records are appended through a serialized promise chain so the
+  // concurrent assessments below never interleave partial writes into the
+  // JSONL file. (Assessment itself is independent per weak catch.)
+  let appendChain: Promise<void> = Promise.resolve();
+  const enqueueAppend = (task: () => Promise<void>): Promise<void> => {
+    appendChain = appendChain.then(task);
+    return appendChain;
+  };
 
-    if (assessment.shouldReport) {
-      reports.push(generateBehaviorReport(assessment, weakCatch));
-    }
-  }
+  const assessed = await mapConcurrent(
+    input.weakCatches,
+    input.config.assessConcurrency,
+    async (weakCatch) => {
+      const recordedAt = new Date().toISOString();
+      const assessmentConfig = input.llm.isBudgetExhausted()
+        ? { ...input.config, llmJudgeEnabled: false }
+        : input.config;
+      const assessment = await assessWeakCatch(
+        weakCatch,
+        input.diff,
+        selectAssessmentExecutionLog(
+          weakCatch.executionLog,
+          weakCatch.childResult.failureMessage,
+        ),
+        input.llm,
+        assessmentConfig,
+      );
+      await enqueueAppend(() =>
+        recordAssessmentFeedback({
+          options: input.options,
+          config: input.config,
+          runId: input.runId,
+          recordedAt,
+          diff: input.diff,
+          weakCatch,
+          assessment,
+        }),
+      );
+
+      return { weakCatch, assessment };
+    },
+  );
+
+  // mapConcurrent preserves input order, so report order is deterministic.
+  const reports: BehaviorReport[] = assessed
+    .filter((entry) => entry.assessment.shouldReport)
+    .map((entry) => generateBehaviorReport(entry.assessment, entry.weakCatch));
 
   return {
     reports,
@@ -527,7 +607,13 @@ export const createCatchCommandResult = async (
   // Construct the LLM client only once we know we'll generate tests. Risk
   // scoring is heuristic (no LLM), so a below-threshold skip must not require
   // an OpenRouter API key.
-  const llm = new LLMClient(config.llm);
+  const cache = config.cache.enabled
+    ? new DiskLLMCache(path.resolve(options.cwd, config.cache.dir))
+    : undefined;
+  const llm = new LLMClient({
+    ...config.llm,
+    ...(cache === undefined ? {} : { cache }),
+  });
 
   const { allTests, genMs } = await generateTests(
     diff,

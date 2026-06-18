@@ -212,10 +212,16 @@ const mockCatchDependencies = (riskScore = 0.8) => {
       cleanup: cleanupMock,
     }),
     cleanupMock,
-    installDependenciesMock: vi.fn().mockResolvedValue(undefined),
+    installWorktreeDependenciesMock: vi.fn().mockResolvedValue(undefined),
     validateIntentAwareTestsMock: vi
       .fn()
       .mockImplementation(async (tests) => tests),
+    flakeGuardTestsMock: vi
+      .fn()
+      .mockImplementation(async (tests: GeneratedTest[]) => ({
+        stableTests: tests,
+        droppedCount: 0,
+      })),
     dualExecutionMock: vi.fn().mockResolvedValue([]),
     assessWeakCatchMock: vi.fn().mockResolvedValue({
       assessments: [],
@@ -264,11 +270,12 @@ const mockCatchDependencies = (riskScore = 0.8) => {
     intentAwareWorkflow: mocks.intentAwareWorkflowMock,
   }));
   vi.doMock("../../source/execution/git-worktree.js", () => ({
-    installDependencies: mocks.installDependenciesMock,
+    installWorktreeDependencies: mocks.installWorktreeDependenciesMock,
     setupWorktrees: mocks.setupWorktreesMock,
   }));
   vi.doMock("../../source/execution/runner.js", () => ({
     dualExecution: mocks.dualExecutionMock,
+    flakeGuardTests: mocks.flakeGuardTestsMock,
     validateIntentAwareTests: mocks.validateIntentAwareTestsMock,
   }));
   vi.doMock("../../source/assessors/pipeline.js", () => ({
@@ -372,7 +379,11 @@ describe("createCatchCommandResult", () => {
     expect(mocks.logger.warn).toHaveBeenCalledWith(
       expect.stringContaining("Generated 3 tests; executing first 2"),
     );
-    expect(mocks.installDependenciesMock).toHaveBeenCalledTimes(2);
+    expect(mocks.installWorktreeDependenciesMock).toHaveBeenCalledWith(
+      "/tmp/parent",
+      "/tmp/child",
+      true,
+    );
     expect(mocks.dualExecutionMock).toHaveBeenCalledWith(
       [dodgyTest, intentTest],
       "/tmp/parent",
@@ -521,5 +532,52 @@ describe("runCatchCommand", () => {
     await runCatchCommand(makeOptions({ output: "github-comment" }));
 
     expect(writeSpy).not.toHaveBeenCalled();
+  });
+
+  it("flake-guards candidates and excludes dropped tests from execution", async () => {
+    const mocks = mockCatchDependencies(0.9);
+    const stableTest = makeGeneratedTest(
+      "dodgy-diff",
+      "test/stable.jittest.test.ts",
+    );
+    const flakyTest = makeGeneratedTest(
+      "dodgy-diff",
+      "test/flaky.jittest.test.ts",
+    );
+    mocks.dodgyDiffWorkflowMock.mockResolvedValue([stableTest, flakyTest]);
+    mocks.flakeGuardTestsMock.mockResolvedValue({
+      stableTests: [stableTest],
+      droppedCount: 1,
+    });
+    mocks.dualExecutionMock.mockResolvedValue([
+      makeDualResult(stableTest, "passed"),
+    ]);
+
+    const { createCatchCommandResult } = await import(
+      "../../source/commands/catch.js"
+    );
+    await createCatchCommandResult(
+      makeOptions({ workflow: "dodgy-diff", flakeGuardRuns: 2 }),
+    );
+
+    expect(mocks.flakeGuardTestsMock).toHaveBeenCalledWith(
+      [stableTest, flakyTest],
+      "/tmp/parent",
+      1000,
+      2,
+      2,
+    );
+    expect(mocks.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining("Flake guard dropped 1"),
+    );
+    // The dropped flaky test never reaches dual execution.
+    expect(mocks.dualExecutionMock).toHaveBeenCalledWith(
+      [stableTest],
+      "/tmp/parent",
+      "/tmp/child",
+      2,
+      1000,
+      true,
+    );
   });
 });

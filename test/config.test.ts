@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -43,6 +47,9 @@ describe("createDefaultConfig", () => {
     expect(config.testTimeout).toBe(30_000);
     expect(config.batchSize).toBe(10);
     expect(config.parallelWorktrees).toBe(true);
+    expect(config.assessConcurrency).toBe(4);
+    expect(config.cache.enabled).toBe(true);
+    expect(config.cache.dir).toBe(".jittest/cache");
     expect(config.rubfakeEnabled).toBe(true);
     expect(config.llmJudgeEnabled).toBe(true);
     expect(config.outputFormat).toBe("console");
@@ -59,6 +66,15 @@ describe("createDefaultConfig", () => {
     delete process.env.OPENROUTER_MODEL;
 
     expect(() => createDefaultConfig()).toThrow();
+  });
+
+  it("populates default assessor weights and thresholds", () => {
+    const { assessors } = createDefaultConfig();
+    expect(assessors.rubfakeWeight).toBe(0.4);
+    expect(assessors.llmWeight).toBe(0.6);
+    expect(assessors.rubfakeOverrideScore).toBe(-0.8);
+    expect(assessors.verdictThresholds.strongCatch).toBe(0.6);
+    expect(assessors.dismissalThresholds.hard).toBe(0.5);
   });
 });
 
@@ -135,6 +151,119 @@ describe("loadConfig", () => {
     process.env.OPENROUTER_MODEL = "meta-llama/llama-4";
 
     expect(loadConfig().llm.model).toBe("meta-llama/llama-4");
+  });
+});
+
+describe("loadConfig with a config file", () => {
+  const originalApiKey = process.env.OPENROUTER_API_KEY;
+  const originalModel = process.env.OPENROUTER_MODEL;
+  let dir: string;
+
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "test-api-key";
+    process.env.OPENROUTER_MODEL = "openai/gpt-4.1";
+    dir = mkdtempSync(path.join(tmpdir(), "jittest-config-"));
+  });
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+    if (originalApiKey === undefined) {
+      delete process.env.OPENROUTER_API_KEY;
+    } else {
+      process.env.OPENROUTER_API_KEY = originalApiKey;
+    }
+    if (originalModel === undefined) {
+      delete process.env.OPENROUTER_MODEL;
+    } else {
+      process.env.OPENROUTER_MODEL = originalModel;
+    }
+  });
+
+  const writeConfig = (value: unknown, at = dir): string => {
+    const filePath = path.join(at, "jittest.config.json");
+    writeFileSync(filePath, JSON.stringify(value), "utf-8");
+    return filePath;
+  };
+
+  it("reads assessor weights from an explicit config path", () => {
+    const filePath = writeConfig({
+      assessors: { rubfakeWeight: 0.7, llmWeight: 0.3 },
+    });
+
+    const config = loadConfig({}, { cwd: dir, configPath: filePath });
+    expect(config.assessors.rubfakeWeight).toBe(0.7);
+    expect(config.assessors.llmWeight).toBe(0.3);
+    // Untouched nested fields keep their defaults.
+    expect(config.assessors.verdictThresholds.strongCatch).toBe(0.6);
+  });
+
+  it("auto-discovers jittest.config.json by walking up from cwd", () => {
+    writeConfig({ reportThreshold: 0.42 });
+    const nested = path.join(dir, "packages", "app");
+    mkdirSync(nested, { recursive: true });
+
+    const config = loadConfig({}, { cwd: nested });
+    expect(config.reportThreshold).toBe(0.42);
+  });
+
+  it("lets CLI overrides win over file values", () => {
+    writeConfig({ reportThreshold: 0.42, workflow: "dodgy-diff" });
+
+    const config = loadConfig({ reportThreshold: 0.9 }, { cwd: dir });
+    // CLI override wins; file value still applies where CLI is silent.
+    expect(config.reportThreshold).toBe(0.9);
+    expect(config.workflow).toBe("dodgy-diff");
+  });
+
+  it("does not let absent CLI flags clobber file values with defaults", () => {
+    writeConfig({ reportThreshold: 0.42 });
+
+    // reportThreshold passed as undefined (an unset CLI flag) must be pruned.
+    const config = loadConfig(
+      { reportThreshold: undefined, workflow: "intent-aware" },
+      { cwd: dir },
+    );
+    expect(config.reportThreshold).toBe(0.42);
+    expect(config.workflow).toBe("intent-aware");
+  });
+
+  it("throws on invalid JSON in the config file", () => {
+    const filePath = path.join(dir, "jittest.config.json");
+    writeFileSync(filePath, "{ not valid json", "utf-8");
+
+    expect(() => loadConfig({}, { cwd: dir })).toThrow(/Invalid JSON/);
+  });
+
+  it("throws when an explicit config path is missing", () => {
+    expect(() =>
+      loadConfig({}, { cwd: dir, configPath: "does-not-exist.json" }),
+    ).toThrow(/Config file not found/);
+  });
+
+  it("reads provider and base URL from the environment", () => {
+    process.env.LLM_PROVIDER = "openai-compatible";
+    process.env.LLM_BASE_URL = "https://api.example.com/v1";
+    try {
+      const config = loadConfig({}, { cwd: dir });
+      expect(config.llm.provider).toBe("openai-compatible");
+      expect(config.llm.baseUrl).toBe("https://api.example.com/v1");
+    } finally {
+      delete process.env.LLM_PROVIDER;
+      delete process.env.LLM_BASE_URL;
+    }
+  });
+
+  it("lets CLI llm overrides win over environment provider", () => {
+    process.env.LLM_PROVIDER = "openai-compatible";
+    try {
+      const config = loadConfig(
+        { llm: { provider: "openrouter" } },
+        { cwd: dir },
+      );
+      expect(config.llm.provider).toBe("openrouter");
+    } finally {
+      delete process.env.LLM_PROVIDER;
+    }
   });
 });
 

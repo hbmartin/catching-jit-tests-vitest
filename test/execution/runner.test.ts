@@ -750,3 +750,90 @@ describe("validateIntentAwareTests", () => {
     );
   });
 });
+
+describe("flakeGuardTests", () => {
+  const fileResult = (
+    tempDir: string,
+    test: GeneratedTest,
+    status: "passed" | "failed",
+  ) => ({
+    name: path.join(tempDir, test.testFilePath),
+    status,
+    assertionResults: [
+      {
+        ancestorTitles: ["suite"],
+        title: test.behaviorDescription,
+        status,
+        failureMessages: status === "failed" ? ["flaked"] : [],
+        duration: 1,
+      },
+    ],
+  });
+
+  it("drops tests that do not pass every parent run", async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), "runner-flake-"));
+    tempDirs.push(tempDir);
+
+    const stableTest = makeTest("test/stable.jittest.test.ts");
+    const flakyTest = makeTest("test/flaky.jittest.test.ts");
+
+    const runPackageManagerExecMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          testResults: [
+            fileResult(tempDir, stableTest, "passed"),
+            fileResult(tempDir, flakyTest, "passed"),
+          ],
+        }),
+        stderr: "",
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          testResults: [
+            fileResult(tempDir, stableTest, "passed"),
+            fileResult(tempDir, flakyTest, "failed"),
+          ],
+        }),
+        stderr: "",
+      });
+
+    vi.doMock("../../source/execution/git-worktree.js", () => ({
+      runPackageManagerExec: runPackageManagerExecMock,
+    }));
+
+    const { flakeGuardTests } = await import(
+      "../../source/execution/runner.js"
+    );
+
+    const result = await flakeGuardTests(
+      [stableTest, flakyTest],
+      tempDir,
+      500,
+      2,
+      10,
+    );
+
+    expect(result.stableTests).toEqual([stableTest]);
+    expect(result.droppedCount).toBe(1);
+    expect(runPackageManagerExecMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("is a no-op when runs is 1", async () => {
+    const runPackageManagerExecMock = vi.fn();
+    vi.doMock("../../source/execution/git-worktree.js", () => ({
+      runPackageManagerExec: runPackageManagerExecMock,
+    }));
+
+    const { flakeGuardTests } = await import(
+      "../../source/execution/runner.js"
+    );
+
+    const tests = [makeTest("test/a.jittest.test.ts")];
+    const result = await flakeGuardTests(tests, "/tmp/parent", 500, 1, 10);
+
+    expect(result.stableTests).toEqual(tests);
+    expect(result.droppedCount).toBe(0);
+    expect(runPackageManagerExecMock).not.toHaveBeenCalled();
+  });
+});

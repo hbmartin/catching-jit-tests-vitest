@@ -1,17 +1,23 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
 
+import { runCalibrateCommand } from "./commands/calibrate.js";
 import { runCatchCommand } from "./commands/catch.js";
-import { parseCatchCommandOptions } from "./config.js";
+import {
+  parseCalibrateCommandOptions,
+  parseCatchCommandOptions,
+} from "./config.js";
 import { cliVersion } from "./version.js";
 
 const helpText = `Usage
   jittest <command> [options]
 
 Commands
-  catch    Generate catching tests for the current diff
+  catch      Generate catching tests for the current diff
+  calibrate  Analyze feedback records and recommend assessor weights
 
 Global options
   --help     Show help
@@ -26,6 +32,8 @@ catch options
   --max-total-tests <n>    Maximum generated tests to execute
   --batch-size <n>         Generated tests per execution batch
   --parallel-worktrees <b> Run parent/child installs and tests in parallel
+  --assess-concurrency <n> Weak catches assessed concurrently (default: 4)
+  --flake-guard-runs <n>   Re-run candidates on parent N times; drop flaky ones
   --include <glob>         Changed file glob to include
   --exclude <glob>         Changed file glob to exclude
   --timeout <ms>           Per-test timeout
@@ -35,9 +43,20 @@ catch options
   --context-file <path>    Extra local context file for intent analysis
   --pr-title <text>        Pull request title for intent-aware analysis
   --pr-body <text>         Pull request body for intent-aware analysis
-  --llm-model <model>      OpenRouter model id
+  --llm-model <model>      Model id (provider-specific)
+  --llm-provider <name>    openrouter | openai-compatible (default: openrouter)
+  --llm-base-url <url>     Base URL for the openai-compatible provider
   --max-cost-usd <number>  Run-level OpenRouter dollar budget
   --max-tokens <number>    Run-level LLM token budget
+  --cwd <path>             Repository root (default: .)
+  --config <path>          Path to jittest.config.json (default: auto-discover)
+  --no-cache               Disable the on-disk LLM response cache
+  --cache-dir <path>       LLM cache directory (default: .jittest/cache)
+
+calibrate options
+  --feedback-path <path>   JSONL feedback records to analyze
+  --output <format>        console | json
+  --config <path>          Path to jittest.config.json (default: auto-discover)
   --cwd <path>             Repository root (default: .)
 `;
 
@@ -69,6 +88,8 @@ const parseCatchOptions = (argv: readonly string[]) => {
       "max-total-tests": { type: "string" },
       "batch-size": { type: "string" },
       "parallel-worktrees": { type: "string" },
+      "assess-concurrency": { type: "string" },
+      "flake-guard-runs": { type: "string" },
       include: { type: "string", multiple: true },
       exclude: { type: "string", multiple: true },
       timeout: { type: "string" },
@@ -79,9 +100,14 @@ const parseCatchOptions = (argv: readonly string[]) => {
       "pr-title": { type: "string" },
       "pr-body": { type: "string" },
       "llm-model": { type: "string" },
+      "llm-provider": { type: "string" },
+      "llm-base-url": { type: "string" },
       "max-cost-usd": { type: "string" },
       "max-tokens": { type: "string" },
       cwd: { type: "string" },
+      config: { type: "string" },
+      "no-cache": { type: "boolean" },
+      "cache-dir": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
     allowPositionals: false,
@@ -101,6 +127,8 @@ const parseCatchOptions = (argv: readonly string[]) => {
     maxTotalTests: parsed.values["max-total-tests"],
     batchSize: parsed.values["batch-size"],
     parallelWorktrees: parsed.values["parallel-worktrees"],
+    assessConcurrency: parsed.values["assess-concurrency"],
+    flakeGuardRuns: parsed.values["flake-guard-runs"],
     include: parsed.values.include,
     exclude: parsed.values.exclude,
     timeout: parsed.values.timeout,
@@ -111,8 +139,39 @@ const parseCatchOptions = (argv: readonly string[]) => {
     prTitle: parsed.values["pr-title"],
     prBody: parsed.values["pr-body"],
     llmModel: parsed.values["llm-model"],
+    llmProvider: parsed.values["llm-provider"],
+    llmBaseUrl: parsed.values["llm-base-url"],
     maxCostUsd: parsed.values["max-cost-usd"],
     maxTokens: parsed.values["max-tokens"],
+    cwd: parsed.values.cwd,
+    configPath: parsed.values.config,
+    noCache: parsed.values["no-cache"],
+    cacheDir: parsed.values["cache-dir"],
+  });
+};
+
+const parseCalibrateOptions = (argv: readonly string[]) => {
+  const parsed = parseArgs({
+    args: [...argv],
+    options: {
+      "feedback-path": { type: "string" },
+      output: { type: "string" },
+      config: { type: "string" },
+      cwd: { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
+    allowPositionals: false,
+  });
+
+  if (parsed.values.help) {
+    printHelp();
+    return null;
+  }
+
+  return parseCalibrateCommandOptions({
+    feedbackPath: parsed.values["feedback-path"],
+    output: parsed.values.output,
+    configPath: parsed.values.config,
     cwd: parsed.values.cwd,
   });
 };
@@ -132,6 +191,16 @@ const executeCommand = async (
 
     if (options !== null) {
       await runCatchCommand(options);
+    }
+
+    return;
+  }
+
+  if (command === "calibrate") {
+    const options = parseCalibrateOptions(rest);
+
+    if (options !== null) {
+      await runCalibrateCommand(options);
     }
 
     return;
@@ -178,11 +247,15 @@ const isDirectExecution = (moduleUrl: string): boolean => {
     return false;
   }
 
-  return pathToFileURL(entryPath).href === moduleUrl;
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(entryPath);
+  } catch {
+    return pathToFileURL(entryPath).href === moduleUrl;
+  }
 };
 
 if (isDirectExecution(import.meta.url)) {
   await main();
 }
 
-export { runCli };
+export { isDirectExecution, runCli };

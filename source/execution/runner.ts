@@ -426,6 +426,44 @@ async function validateIntentAwareTests(
   return tests.filter((test) => validatedTests.has(test));
 }
 
+// Run each candidate test `runs` times on the parent worktree and keep only the
+// ones that pass every run. A weak catch already requires a parent pass, so this
+// pre-pass tightens that gate and discards timing/ordering/randomness-driven
+// flakes that the static RubFake rules cannot detect. `runs <= 1` is a no-op.
+async function flakeGuardTests(
+  tests: readonly GeneratedTest[],
+  parentDir: string,
+  testTimeout: number,
+  runs: number,
+  batchSize: number,
+): Promise<{ stableTests: GeneratedTest[]; droppedCount: number }> {
+  if (runs <= 1 || tests.length === 0) {
+    return { stableTests: [...tests], droppedCount: 0 };
+  }
+
+  const passCounts = new Map<GeneratedTest, number>();
+  for (const test of tests) {
+    passCounts.set(test, 0);
+  }
+
+  for (let attempt = 0; attempt < runs; attempt += 1) {
+    for (const batch of chunk(tests, batchSize)) {
+      const { results } = await runVitest(parentDir, batch, testTimeout);
+      for (const test of batch) {
+        const outcome = results.get(
+          normalizeResultPath(parentDir, test.testFilePath),
+        );
+        if (outcome?.status === "passed") {
+          passCounts.set(test, (passCounts.get(test) ?? 0) + 1);
+        }
+      }
+    }
+  }
+
+  const stableTests = tests.filter((test) => passCounts.get(test) === runs);
+  return { stableTests, droppedCount: tests.length - stableTests.length };
+}
+
 async function dualExecution(
   tests: readonly GeneratedTest[],
   parentDir: string,
@@ -474,4 +512,4 @@ async function dualExecution(
   return results;
 }
 
-export { dualExecution, runVitest, validateIntentAwareTests };
+export { dualExecution, flakeGuardTests, runVitest, validateIntentAwareTests };

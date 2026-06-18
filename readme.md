@@ -28,6 +28,7 @@ false-positive filtering.
 - [Output formats](#output-formats)
 - [Configuration](#configuration)
 - [Feedback records](#feedback-records)
+- [Calibration](#calibration)
 - [Programmatic API](#programmatic-api)
 - [Local development](#local-development)
 - [Project layout](#project-layout)
@@ -81,10 +82,17 @@ candidates" in JSON output because they may still be useful regression tests.
 - Repeated `--include` and `--exclude` globs for monorepos and mixed-language
   repositories.
 - Temporary worktree execution so generated tests are run against clean parent
-  and child checkouts.
+  and child checkouts, reusing a single dependency install when the lockfile is
+  unchanged across the two refs.
 - Package-manager detection for `pnpm`, `npm`, and `yarn`.
+- Pluggable LLM providers: OpenRouter, a generic OpenAI-compatible endpoint, or
+  any AI SDK model injected programmatically.
+- On-disk LLM response cache and a run-level token/dollar budget.
+- Optional flake guard (`--flake-guard-runs`) that drops candidates that are not
+  stably green on the parent revision.
 - Console, JSON, and GitHub comment output.
-- Assessment feedback records for later triage and tuning.
+- Assessment feedback records plus a `jittest calibrate` command that turns
+  triaged labels into recommended assessor weights.
 - TypeScript exports for lower-level pipeline pieces.
 
 ## Requirements
@@ -94,12 +102,17 @@ candidates" in JSON output because they may still be useful regression tests.
 - A TypeScript project that can run tests with Vitest
 - One of `pnpm`, `npm`, or `yarn` available for dependency installation in
   temporary worktrees
-- `OPENROUTER_API_KEY` in the environment
-- An OpenRouter model supplied by `--llm-model`, `OPENROUTER_MODEL`, or
+- An API key for your LLM provider (`OPENROUTER_API_KEY`, or `LLM_API_KEY` for
+  the generic provider)
+- A model supplied by `--llm-model`, `OPENROUTER_MODEL` / `LLM_MODEL`, or
   programmatic config
 
-The current LLM provider implementation supports OpenRouter only. There is no
-default model.
+The CLI ships with two providers: `openrouter` (default) and a generic
+`openai-compatible` provider for OpenAI, Together, vLLM, Ollama, and similar
+endpoints (set `--llm-provider openai-compatible --llm-base-url <url>` or
+`LLM_PROVIDER` / `LLM_BASE_URL`). Library consumers can bypass both and inject
+any [AI SDK](https://sdk.vercel.ai) model directly — see
+[Programmatic API](#programmatic-api). There is no default model.
 
 ## Quick start
 
@@ -139,7 +152,8 @@ Usage
   jittest <command> [options]
 
 Commands
-  catch    Generate catching tests for the current diff
+  catch      Generate catching tests for the current diff
+  calibrate  Analyze feedback records and recommend assessor weights
 
 Global options
   --help     Show help
@@ -154,6 +168,8 @@ catch options
   --max-total-tests <n>    Maximum generated tests to execute
   --batch-size <n>         Generated tests per execution batch
   --parallel-worktrees <b> Run parent/child installs and tests in parallel
+  --assess-concurrency <n> Weak catches assessed concurrently (default: 4)
+  --flake-guard-runs <n>   Re-run candidates on parent N times; drop flaky ones
   --include <glob>         Changed file glob to include
   --exclude <glob>         Changed file glob to exclude
   --timeout <ms>           Per-test timeout
@@ -163,9 +179,20 @@ catch options
   --context-file <path>    Extra local context file for intent analysis
   --pr-title <text>        Pull request title for intent-aware analysis
   --pr-body <text>         Pull request body for intent-aware analysis
-  --llm-model <model>      OpenRouter model id
+  --llm-model <model>      Model id (provider-specific)
+  --llm-provider <name>    openrouter | openai-compatible (default: openrouter)
+  --llm-base-url <url>     Base URL for the openai-compatible provider
   --max-cost-usd <number>  Run-level OpenRouter dollar budget
   --max-tokens <number>    Run-level LLM token budget
+  --cwd <path>             Repository root (default: .)
+  --config <path>          Path to jittest.config.json (default: auto-discover)
+  --no-cache               Disable the on-disk LLM response cache
+  --cache-dir <path>       LLM cache directory (default: .jittest/cache)
+
+calibrate options
+  --feedback-path <path>   JSONL feedback records to analyze
+  --output <format>        console | json
+  --config <path>          Path to jittest.config.json (default: auto-discover)
   --cwd <path>             Repository root (default: .)
 ```
 
@@ -539,15 +566,20 @@ there is a status message, such as a skipped low-risk run.
 
 ## Configuration
 
-Configuration is currently supplied through CLI flags or programmatic API
-overrides. There is no project-level config file loader yet.
+Configuration is resolved from three layers, lowest precedence first:
+
+1. A `jittest.config.json` file (auto-discovered by walking up from `--cwd`, or
+   pointed at explicitly with `--config <path>`).
+2. Environment variables.
+3. CLI flags / programmatic API overrides.
 
 Default runtime configuration:
 
 ```ts
 {
   llm: {
-    provider: "openrouter",
+    provider: "openrouter", // or "openai-compatible"
+    baseUrl: undefined,     // required for the openai-compatible provider
     model: "anthropic/claude-sonnet-4", // required; no built-in default
     maxTokens: 4096, // per-call output-token cap
     providerOptions: {},
@@ -561,9 +593,19 @@ Default runtime configuration:
   testTimeout: 30000,
   batchSize: 10,
   parallelWorktrees: true,
+  assessConcurrency: 4, // weak catches assessed in parallel
+  flakeGuardRuns: 1,    // >1 re-runs candidates on parent and drops flaky ones
   reportThreshold: 0,
   rubfakeEnabled: true,
   llmJudgeEnabled: true,
+  assessors: {
+    rubfakeWeight: 0.4,
+    llmWeight: 0.6,
+    rubfakeOverrideScore: -0.8,
+    verdictThresholds: { strongCatch: 0.6, likelyStrong: 0.3, uncertain: -0.3, likelyFalsePositive: -0.6 },
+    dismissalThresholds: { trivial: -0.2, easy: 0, moderate: 0.3, hard: 0.5 }
+  },
+  cache: { enabled: true, dir: ".jittest/cache" }, // LLM response cache
   outputFormat: "console",
   feedbackPath: ".jittest/assessment-records.jsonl",
   contextFiles: [],
@@ -572,12 +614,34 @@ Default runtime configuration:
 }
 ```
 
+### Config file
+
+Any subset of the runtime configuration above can be set in
+`jittest.config.json`. The `assessors` block is the main thing you will tune by
+hand or via `jittest calibrate` (see [Calibration](#calibration)):
+
+```json
+{
+  "reportThreshold": 0.1,
+  "assessors": { "rubfakeWeight": 0.55, "llmWeight": 0.45 }
+}
+```
+
+### LLM response cache
+
+Generation and judging responses are cached on disk (default `.jittest/cache`,
+keyed on model + prompt + decoding params + output schema), so re-running on an
+unchanged diff is near-free and records as zero-cost cache hits. Disable with
+`--no-cache` or relocate with `--cache-dir`.
+
 ### Environment variables
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` | Yes | API key used for test generation, risk inference, mutant generation, and LLM judging. |
-| `OPENROUTER_MODEL` | Yes unless `--llm-model` or programmatic `llm.model` is set | OpenRouter model id. |
+| `OPENROUTER_API_KEY` / `LLM_API_KEY` | Yes | API key for test generation, risk inference, mutant generation, and LLM judging. `LLM_API_KEY` takes precedence. |
+| `OPENROUTER_MODEL` / `LLM_MODEL` | Yes unless `--llm-model` or programmatic `llm.model` is set | Model id. |
+| `LLM_PROVIDER` | No | `openrouter` (default) or `openai-compatible`. |
+| `LLM_BASE_URL` | When provider is `openai-compatible` | Base URL of the OpenAI-compatible endpoint. |
 
 All other environment variables from the current process are inherited by the
 Vitest runs in the temporary worktrees.
@@ -600,7 +664,9 @@ Records include:
 - PR metadata
 - Weak catch details
 - Assessment details
-- Placeholder engineer feedback fields
+- Engineer feedback (`engineerFeedback.label`: `unknown` by default; set it to
+  `confirmed-true-positive`, `confirmed-false-positive`, or `intended-change`
+  during triage to feed calibration)
 
 This repository ignores `.jittest/` by default so local feedback records do not
 accidentally get committed.
@@ -609,6 +675,35 @@ Use a different path with:
 
 ```sh
 jittest catch --feedback-path report/jittest-assessments.jsonl
+```
+
+## Calibration
+
+Once you have triaged some records (set their `engineerFeedback.label`), close
+the loop with `jittest calibrate`. It reads the feedback JSONL, scores the
+current assessor configuration against your labels (precision / recall / F1),
+grid-searches better combiner weights and a report threshold, and prints a
+recommended `jittest.config.json` block. It only reports — nothing is written
+automatically, so you decide whether to adopt the suggestion.
+
+```sh
+jittest calibrate                 # human-readable summary + recommended block
+jittest calibrate --output json   # machine-readable metrics
+```
+
+Example:
+
+```text
+jittest calibrate
+Labeled records: 142 (positive: 38, negative: 104, skipped: 60)
+Current  precision=0.61 recall=0.74 f1=0.67 (TP=28 FP=18 FN=10 TN=86)
+Best     precision=0.79 recall=0.71 f1=0.75 (TP=27 FP=7 FN=11 TN=97)
+
+Recommended jittest.config.json block:
+{
+  "reportThreshold": 0.05,
+  "assessors": { "rubfakeWeight": 0.55, "llmWeight": 0.45 }
+}
 ```
 
 ## Programmatic API
@@ -647,6 +742,25 @@ const generated = await dodgyDiffWorkflow(diff, cwd, llm, config);
 console.log({
   riskScore: diff.riskScore,
   generated: generated.length,
+});
+```
+
+### Bring your own AI SDK provider
+
+Library consumers can bypass the built-in providers entirely by injecting a
+resolved [AI SDK](https://sdk.vercel.ai) model (`languageModel`) or a factory
+(`modelFactory`, which lets judge ensembles vary the model id). No
+`OPENROUTER_API_KEY` is required in this mode; token usage falls back to the AI
+SDK's accounting and dollar cost is reported as unknown.
+
+```ts
+import { anthropic } from "@ai-sdk/anthropic";
+import { LLMClient } from "catching-jit-tests-vitest";
+
+const llm = new LLMClient({
+  model: "claude-sonnet-4", // used as the stats label
+  maxTokens: 4096,
+  languageModel: anthropic("claude-sonnet-4"),
 });
 ```
 
@@ -804,6 +918,11 @@ jobs:
 If you install the package into the target repository instead of building this
 repository, replace `node dist/cli.js catch` with `jittest catch` or
 `pnpm exec jittest catch`.
+
+This repository also includes a manual, JSON-producing demo workflow at
+[`.github/workflows/jittest-demo.yml`](.github/workflows/jittest-demo.yml). It
+accepts arbitrary base/head refs, tuning thresholds, model, and budget inputs,
+then uploads the resulting JiTTest report as a workflow artifact.
 
 For a manually triggered workflow that accepts a pull request number as input,
 see [Manual GitHub Action for a Pull Request](docs/manual-github-action-pr.md).

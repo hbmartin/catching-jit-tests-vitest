@@ -317,6 +317,37 @@ function matchesIntentSignal(
   return signals.some((pattern) => pattern.test(intentText(ctx)));
 }
 
+// Per-pattern RubFake scores, centralized for discoverability. These are
+// intentionally internal (not part of the per-run config surface): `calibrate`
+// and `jittest.config.json` tune the combiner weights and verdict thresholds,
+// not these rule-level magnitudes. Negative = false-positive, positive =
+// true-positive; the strongest magnitude wins in `evaluateRubFake`.
+const RUBFAKE_SCORES = {
+  brokenMock: { mockFailure: -0.9, heavyMocking: -0.4 },
+  typeMismatch: -0.8,
+  infrastructureFailure: -1.0,
+  notImplementedException: -0.9,
+  dataProviderBroken: -0.8,
+  undefinedVariable: -0.8,
+  implementationDependent: {
+    callCount: -0.6,
+    ordering: -0.7,
+    privateMember: -0.8,
+  },
+  reflectionBrittle: -0.7,
+  snapshotMismatch: -0.5,
+  flakiness: -0.2,
+  changedBool: { directChange: 0.35, flip: 0.7 },
+  nullValue: { directChange: 0.4, introduced: 0.75 },
+  emptyContainer: 0.65,
+  unexpectedKeyChange: 0.7,
+  createFailure: 0.65,
+  refactorIntent: 0.8,
+  deadCodeRemoval: 0.8,
+  monotonicChange: 0.7,
+  rbac: 0.75,
+} as const;
+
 const falsePositiveRules: readonly RubFakeRule[] = [
   {
     name: "broken_mock",
@@ -328,7 +359,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
         if (pattern.test(ctx.executionLog)) {
           const match = pattern.exec(ctx.executionLog);
           return {
-            score: -0.9,
+            score: RUBFAKE_SCORES.brokenMock.mockFailure,
             evidence: `Mock failure detected: ${match?.[0] ?? "unknown"}`,
           };
         }
@@ -338,7 +369,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       const mockCount = mockMatches ? mockMatches.length : 0;
       if (mockCount > 5) {
         return {
-          score: -0.4,
+          score: RUBFAKE_SCORES.brokenMock.heavyMocking,
           evidence: `Heavy mocking detected (${String(mockCount)} mock calls) — brittle test`,
         };
       }
@@ -360,7 +391,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
           );
           if (errorInTest) {
             return {
-              score: -0.8,
+              score: RUBFAKE_SCORES.typeMismatch,
               evidence: `Type error in generated test code: ${match[0]}`,
             };
           }
@@ -379,7 +410,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
         if (pattern.test(ctx.executionLog)) {
           const match = pattern.exec(ctx.executionLog);
           return {
-            score: -1.0,
+            score: RUBFAKE_SCORES.infrastructureFailure,
             evidence: `Infrastructure failure: ${match?.[0] ?? "unknown"}`,
           };
         }
@@ -401,7 +432,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: -0.9,
+        score: RUBFAKE_SCORES.notImplementedException,
         evidence:
           "Failure appears to come from an intentional not-implemented placeholder",
       };
@@ -421,7 +452,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: -0.8,
+        score: RUBFAKE_SCORES.dataProviderBroken,
         evidence: "Generated parameterized test data appears malformed",
       };
     },
@@ -443,7 +474,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: -0.8,
+        score: RUBFAKE_SCORES.undefinedVariable,
         evidence: "Generated test refers to an undefined variable or symbol",
       };
     },
@@ -456,7 +487,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
     evaluate(ctx: RuleContext): PatternMatch | null {
       if (callCountPattern.test(ctx.testCode)) {
         return {
-          score: -0.6,
+          score: RUBFAKE_SCORES.implementationDependent.callCount,
           evidence:
             "Test asserts specific call count — implementation dependent",
         };
@@ -468,7 +499,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
           ctx.weakCatch.behaviorChange.changeType === "ordering-changed")
       ) {
         return {
-          score: -0.7,
+          score: RUBFAKE_SCORES.implementationDependent.ordering,
           evidence:
             "Object property ordering mismatch — implementation dependent",
         };
@@ -476,7 +507,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
 
       if (privateMemberPattern.test(ctx.testCode)) {
         return {
-          score: -0.8,
+          score: RUBFAKE_SCORES.implementationDependent.privateMember,
           evidence: "Test accesses private/internal members",
         };
       }
@@ -493,7 +524,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       for (const pattern of reflectionPatterns) {
         if (pattern.test(ctx.testCode)) {
           return {
-            score: -0.7,
+            score: RUBFAKE_SCORES.reflectionBrittle,
             evidence: "Test uses reflection — inherently brittle",
           };
         }
@@ -512,7 +543,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
         toMatchInlineSnapshotPattern.test(ctx.testCode);
       if (usesSnapshots && snapshotMismatchPattern.test(ctx.executionLog)) {
         return {
-          score: -0.5,
+          score: RUBFAKE_SCORES.snapshotMismatch,
           evidence:
             "Snapshot-based assertion — high FP rate for catching tests",
         };
@@ -535,7 +566,7 @@ const falsePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: -0.2,
+        score: RUBFAKE_SCORES.flakiness,
         evidence: "Failure contains timing or nondeterminism signals",
       };
     },
@@ -555,14 +586,14 @@ const truePositiveRules: readonly RubFakeRule[] = [
 
       if (hasDirectBooleanChange(ctx)) {
         return {
-          score: 0.35,
+          score: RUBFAKE_SCORES.changedBool.directChange,
           evidence:
             "Boolean flipped, but the diff directly changes boolean logic",
         };
       }
 
       return {
-        score: 0.7,
+        score: RUBFAKE_SCORES.changedBool.flip,
         evidence: "Boolean flipped from true to false (or vice versa)",
       };
     },
@@ -579,14 +610,14 @@ const truePositiveRules: readonly RubFakeRule[] = [
 
       if (hasDirectNullishChange(ctx)) {
         return {
-          score: 0.4,
+          score: RUBFAKE_SCORES.nullValue.directChange,
           evidence:
             "A value became null/undefined, but the diff directly changes nullish logic",
         };
       }
 
       return {
-        score: 0.75,
+        score: RUBFAKE_SCORES.nullValue.introduced,
         evidence: "A value became null/undefined",
       };
     },
@@ -612,7 +643,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: 0.65,
+        score: RUBFAKE_SCORES.emptyContainer,
         evidence: "A container/array became empty, causing an access failure",
       };
     },
@@ -631,7 +662,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: 0.7,
+        score: RUBFAKE_SCORES.unexpectedKeyChange,
         evidence: "An expected key or property disappeared unexpectedly",
       };
     },
@@ -650,7 +681,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: 0.65,
+        score: RUBFAKE_SCORES.createFailure,
         evidence: "Object creation now fails despite previously succeeding",
       };
     },
@@ -663,7 +694,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
     evaluate(ctx: RuleContext): PatternMatch | null {
       if (matchesIntentSignal(ctx, refactorSignals)) {
         return {
-          score: 0.8,
+          score: RUBFAKE_SCORES.refactorIntent,
           evidence:
             "PR intent appears to be refactoring, but behavior changed — likely unintended",
         };
@@ -688,7 +719,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: 0.8,
+        score: RUBFAKE_SCORES.deadCodeRemoval,
         evidence:
           "PR intent is dead-code removal, but observable behavior changed",
       };
@@ -702,7 +733,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
     evaluate(ctx: RuleContext): PatternMatch | null {
       if (matchesIntentSignal(ctx, addOnlySignals)) {
         return {
-          score: 0.7,
+          score: RUBFAKE_SCORES.monotonicChange,
           evidence: "PR intent is additive-only, but existing behavior changed",
         };
       }
@@ -725,7 +756,7 @@ const truePositiveRules: readonly RubFakeRule[] = [
       }
 
       return {
-        score: 0.75,
+        score: RUBFAKE_SCORES.rbac,
         evidence:
           "Access-control behavior changed; RBAC failures are high-impact and context-sensitive",
       };

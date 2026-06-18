@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Assessment } from "../../source/assessors/types.js";
-import type { JiTTestConfig } from "../../source/config.js";
+import {
+  assessorsConfigSchema,
+  type JiTTestConfig,
+} from "../../source/config.js";
 import type { DiffContext } from "../../source/diff/types.js";
 import type { WeakCatch } from "../../source/harvest/types.js";
 import type { LLMClient } from "../../source/utils/llm-client.js";
@@ -85,6 +88,7 @@ const config = {
   llmJudgeEnabled: true,
   judgeModels: ["judge-a"],
   reportThreshold: 0,
+  assessors: assessorsConfigSchema.parse({}),
 } as JiTTestConfig;
 
 const llm = {

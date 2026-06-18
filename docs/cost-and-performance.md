@@ -205,3 +205,30 @@ spikes the day's total — that's usually the signal to raise
   anything and still pay for risk inference and generation prompts.
 - Pre-emptively reducing prompt context — the prompts are already lean;
   most cost is in completions, not prompts.
+
+## The response cache
+
+LLM responses are cached on disk (default `.jittest/cache`), keyed on the model,
+prompt, decoding parameters, and output schema. Re-running `jittest catch` on an
+unchanged diff — a CI retry, a re-run after a flaky infra failure, or local
+iteration — serves generation and judging from the cache and records them as
+zero-cost cache hits (`llmUsage.cacheHits`). The cache is content-addressed, so
+any change to a prompt, the model, or the diff misses cleanly and regenerates.
+
+Disable it with `--no-cache`, or relocate it with `--cache-dir`. In CI, persist
+`.jittest/cache` across runs (e.g. `actions/cache`) to make retries free.
+
+## Dependency installs
+
+When the lockfile is byte-identical between the base and head refs — the common
+case, since most PRs do not touch it — `jittest` installs dependencies once in
+the parent worktree and symlinks the child's `node_modules` to it, instead of
+installing twice. PRs that change the lockfile fall back to installing both
+worktrees (in parallel when `--parallel-worktrees` is on).
+
+## Assessment concurrency
+
+Weak catches are assessed concurrently (`--assess-concurrency`, default 4).
+Each assessment may issue an LLM-judge call, so raising this shortens
+wall-clock on diffs with many weak catches at the cost of more concurrent
+in-flight LLM requests. Feedback-record writes remain serialized regardless.
