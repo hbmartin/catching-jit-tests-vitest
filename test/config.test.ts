@@ -186,8 +186,8 @@ describe("loadConfig with a config file", () => {
     return filePath;
   };
 
-  const mockLoggerWarn = () =>
-    vi.spyOn(logger, "warn").mockImplementation(() => undefined);
+  const mockLoggerInfo = () =>
+    vi.spyOn(logger, "info").mockImplementation(() => undefined);
 
   const nestedLlmFileConfig = () => ({
     llm: {
@@ -255,28 +255,61 @@ describe("loadConfig with a config file", () => {
     });
   });
 
-  it("warns per leaf when a CLI override replaces a file value", () => {
-    const warnSpy = mockLoggerWarn();
+  it("logs an override notice per leaf when a CLI override replaces a file value", () => {
+    const infoSpy = mockLoggerInfo();
     try {
       writeConfig(nestedLlmFileConfig());
 
       loadConfig(nestedLlmOverrides(), { cwd: dir });
 
-      expect(warnSpy).toHaveBeenCalledWith(
-        "llm.budget.maxTokens: 50000 -> 10000",
+      expect(infoSpy).toHaveBeenCalledWith(
+        "config override: llm.budget.maxTokens: 50000 -> 10000",
       );
-      expect(warnSpy).toHaveBeenCalledWith(
-        "llm.providerOptions.openrouter.reasoning.effort: medium -> low",
+      expect(infoSpy).toHaveBeenCalledWith(
+        "config override: llm.providerOptions.openrouter.reasoning.effort: medium -> low",
       );
-      // Only the two replaced leaves warn; retained file values stay quiet.
-      expect(warnSpy).toHaveBeenCalledTimes(2);
+      // Only the two replaced leaves log; retained file values stay quiet.
+      expect(infoSpy).toHaveBeenCalledTimes(2);
     } finally {
-      warnSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
-  it("does not warn when a CLI override only adds new nested leaves", () => {
-    const warnSpy = mockLoggerWarn();
+  it("logs structured override values as JSON", () => {
+    const infoSpy = mockLoggerInfo();
+    try {
+      writeConfig({
+        llm: {
+          providerOptions: {
+            openrouter: { transforms: ["middle-out"] },
+          },
+        },
+      });
+
+      loadConfig(
+        {
+          llm: {
+            providerOptions: {
+              openrouter: {
+                transforms: { strategy: "middle-out" },
+              },
+            },
+          },
+        },
+        { cwd: dir },
+      );
+
+      expect(infoSpy).toHaveBeenCalledWith(
+        'config override: llm.providerOptions.openrouter.transforms: ["middle-out"] -> {"strategy":"middle-out"}',
+      );
+      expect(infoSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      infoSpy.mockRestore();
+    }
+  });
+
+  it("does not log an override notice when a CLI override only adds new nested leaves", () => {
+    const infoSpy = mockLoggerInfo();
     try {
       writeConfig({
         llm: {
@@ -299,14 +332,14 @@ describe("loadConfig with a config file", () => {
         { cwd: dir },
       );
 
-      expect(warnSpy).not.toHaveBeenCalled();
+      expect(infoSpy).not.toHaveBeenCalled();
     } finally {
-      warnSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
   it("does not let undefined nested CLI overrides clobber file values", () => {
-    const warnSpy = mockLoggerWarn();
+    const infoSpy = mockLoggerInfo();
     try {
       writeConfig({
         llm: {
@@ -341,9 +374,9 @@ describe("loadConfig with a config file", () => {
         routing: "file",
         transforms: ["middle-out"],
       });
-      expect(warnSpy).not.toHaveBeenCalled();
+      expect(infoSpy).not.toHaveBeenCalled();
     } finally {
-      warnSpy.mockRestore();
+      infoSpy.mockRestore();
     }
   });
 
@@ -405,6 +438,24 @@ describe("loadConfig with a config file", () => {
     writeFileSync(filePath, "{ not valid json", "utf-8");
 
     expect(() => loadConfig({}, { cwd: dir })).toThrow(/Invalid JSON/);
+  });
+
+  it("throws when the config file is not a JSON object", () => {
+    writeConfig(["not", "an", "object"]);
+
+    expect(() => loadConfig({}, { cwd: dir })).toThrow(
+      /must contain a JSON object/,
+    );
+  });
+
+  it("uses defaults when an explicit config path cannot be read as a file", () => {
+    const configDir = path.join(dir, "config-dir");
+    mkdirSync(configDir);
+
+    const config = loadConfig({}, { cwd: dir, configPath: configDir });
+
+    expect(config.testsPerFunction).toBe(3);
+    expect(config.llm.model).toBe("openai/gpt-4.1");
   });
 
   it("throws when an explicit config path is missing", () => {
