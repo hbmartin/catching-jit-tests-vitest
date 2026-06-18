@@ -215,6 +215,46 @@ describe("loadConfig with a config file", () => {
     expect(config.workflow).toBe("dodgy-diff");
   });
 
+  it("deep-merges nested llm objects from file config and CLI overrides", () => {
+    writeConfig({
+      llm: {
+        budget: {
+          maxCostUsd: 1.25,
+          maxTokens: 50_000,
+        },
+        providerOptions: {
+          openrouter: {
+            reasoning: { effort: "medium" },
+            transforms: ["middle-out"],
+          },
+        },
+      },
+    });
+
+    const config = loadConfig(
+      {
+        llm: {
+          budget: { maxTokens: 10_000 },
+          providerOptions: {
+            openrouter: {
+              reasoning: { effort: "low" },
+            },
+          },
+        },
+      },
+      { cwd: dir },
+    );
+
+    expect(config.llm.budget).toEqual({
+      maxCostUsd: 1.25,
+      maxTokens: 10_000,
+    });
+    expect(config.llm.providerOptions.openrouter).toEqual({
+      reasoning: { effort: "low" },
+      transforms: ["middle-out"],
+    });
+  });
+
   it("does not let absent CLI flags clobber file values with defaults", () => {
     writeConfig({ reportThreshold: 0.42 });
 

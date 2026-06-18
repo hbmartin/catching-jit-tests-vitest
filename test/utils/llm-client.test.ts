@@ -707,4 +707,119 @@ describe("LLMClient", () => {
       expect.objectContaining({ type: "cache-hit" }),
     );
   });
+
+  it("separates cached responses by provider options end-to-end", async () => {
+    const { provider } = makeProvider();
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "provider-specific body",
+        inputTokens: 9,
+        outputTokens: 6,
+        costUsd: 0.003,
+      }),
+    );
+
+    const store = new Map<string, unknown>();
+    const cache = {
+      get: vi.fn(async (key: string) => store.get(key)),
+      set: vi.fn(async (key: string, value: unknown) => {
+        store.set(key, value);
+      }),
+    };
+
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+    const lowReasoningClient = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+        providerOptions: {
+          openrouter: {
+            reasoning: { effort: "low" },
+          },
+        },
+        cache: cache as never,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+    const highReasoningClient = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+        providerOptions: {
+          openrouter: {
+            reasoning: { effort: "high" },
+          },
+        },
+        cache: cache as never,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+
+    await lowReasoningClient.complete({ prompt: "same prompt" });
+    await highReasoningClient.complete({ prompt: "same prompt" });
+
+    expect(generateTextMock).toHaveBeenCalledTimes(2);
+    expect(cache.set).toHaveBeenCalledTimes(2);
+
+    const cacheKeys = cache.set.mock.calls.map(([key]) => key);
+    expect(new Set(cacheKeys).size).toBe(2);
+  });
+
+  it("uses the same cache key for absent and empty provider options", async () => {
+    const { provider } = makeProvider();
+    const generateTextMock = vi.fn().mockResolvedValue(
+      makeAiResult({
+        text: "shared body",
+        inputTokens: 9,
+        outputTokens: 6,
+        costUsd: 0.003,
+      }),
+    );
+
+    const store = new Map<string, unknown>();
+    const cache = {
+      get: vi.fn(async (key: string) => store.get(key)),
+      set: vi.fn(async (key: string, value: unknown) => {
+        store.set(key, value);
+      }),
+    };
+
+    const { LLMClient } = await import("../../source/utils/llm-client.js");
+    const absentOptionsClient = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+        cache: cache as never,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+    const emptyOptionsClient = new LLMClient(
+      {
+        apiKey: "",
+        model: "openai/gpt-4.1",
+        maxTokens: 100,
+        providerOptions: {},
+        cache: cache as never,
+      },
+      provider as never,
+      undefined,
+      generateTextMock as never,
+    );
+
+    await absentOptionsClient.complete({ prompt: "same prompt" });
+    await emptyOptionsClient.complete({ prompt: "same prompt" });
+
+    expect(generateTextMock).toHaveBeenCalledTimes(1);
+    expect(cache.set).toHaveBeenCalledTimes(1);
+    expect(cache.get.mock.calls[0]?.[0]).toBe(cache.get.mock.calls[1]?.[0]);
+  });
 });

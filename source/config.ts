@@ -200,6 +200,36 @@ function pruneUndefined(
   return result;
 }
 
+function mergeRecords(
+  base: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...base };
+  for (const [key, overrideValue] of Object.entries(overrides)) {
+    const baseValue = result[key];
+    result[key] =
+      isRecord(baseValue) && isRecord(overrideValue)
+        ? mergeRecords(baseValue, overrideValue)
+        : overrideValue;
+  }
+  return result;
+}
+
+function mergeNestedRecord(
+  base: Record<string, unknown>,
+  overrides: Record<string, unknown>,
+  key: string,
+): unknown {
+  const baseValue = base[key];
+  const overrideValue = overrides[key];
+
+  if (isRecord(baseValue) && isRecord(overrideValue)) {
+    return mergeRecords(baseValue, overrideValue);
+  }
+
+  return overrideValue ?? baseValue;
+}
+
 function readConfigFileAt(filePath: string): Record<string, unknown> {
   let raw: string;
   try {
@@ -310,6 +340,12 @@ function loadConfig(
       apiKey: envApiKey.length > 0 ? envApiKey : fileApiKey,
       ...(envModel.length > 0 ? { model: envModel } : {}),
       ...llmOverrides,
+      providerOptions: mergeNestedRecord(
+        fileLlm,
+        llmOverrides,
+        "providerOptions",
+      ),
+      budget: mergeNestedRecord(fileLlm, llmOverrides, "budget"),
     },
   };
   return jitTestConfigSchema.parse(base);
