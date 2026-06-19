@@ -32,6 +32,7 @@ import type { HardeningCandidate } from "../harvest/types.js";
 import { generateBehaviorReport } from "../reporting/behavior-change.js";
 import { formatCatchResult } from "../reporting/console.js";
 import { formatPRComment } from "../reporting/github-comment.js";
+import { formatGithubStepSummary } from "../reporting/github-step-summary.js";
 import { formatJsonReport } from "../reporting/json-report.js";
 import type { BehaviorReport, RunStats } from "../reporting/types.js";
 import { runStatsSchema } from "../runtime-schemas.js";
@@ -39,6 +40,20 @@ import { mapConcurrent } from "../utils/concurrency.js";
 import { DiskLLMCache } from "../utils/llm-cache.js";
 import { LLMClient } from "../utils/llm-client.js";
 import { logger } from "../utils/logger.js";
+import { runCommand } from "../utils/process.js";
+
+import { writeOutputFile } from "./report-utils.js";
+
+const findingsExitCode = 2;
+const sameRevisionExitCode = 3;
+
+const verdictRank = {
+  "false-positive": 0,
+  "likely-false-positive": 1,
+  uncertain: 2,
+  "likely-strong": 3,
+  "strong-catch": 4,
+} as const;
 
 interface CatchCommandResult {
   baseRef: string;
@@ -51,6 +66,7 @@ interface CatchCommandResult {
   hardeningCandidates: readonly HardeningCandidate[];
   stats: RunStats | null;
   statusMessage?: string;
+  exitCode?: number;
 }
 
 const writeStdout = (value: string): void => {
@@ -105,6 +121,11 @@ const createCommandConfig = (options: CatchCommandOptions) => {
       reportThreshold: options.reportThreshold,
       feedbackPath: options.feedbackPath,
       contextFiles: options.contextFiles,
+      autoContext:
+        options.noAutoContext === undefined
+          ? undefined
+          : !options.noAutoContext,
+      autoContextFiles: options.autoContextFiles,
       include: options.include,
       exclude: options.exclude,
       cache: buildCacheOverride(options),
@@ -133,6 +154,7 @@ const createResult = (
   hardeningCandidates: readonly HardeningCandidate[],
   stats: RunStats | null,
   statusMessage?: string,
+  exitCode?: number,
 ): CatchCommandResult => ({
   baseRef: options.base,
   headRef: options.head,
@@ -144,10 +166,70 @@ const createResult = (
   hardeningCandidates,
   stats,
   statusMessage,
+  exitCode,
 });
+
+const emptyDiff = (
+  options: CatchCommandOptions,
+  baseSha: string,
+  headSha: string,
+): DiffContext => ({
+  rawDiff: "",
+  pr: {
+    title: options.prTitle,
+    body: options.prBody,
+    branch: options.head,
+    baseSha,
+    headSha,
+  },
+  files: [],
+  riskScore: 0,
+  riskFactors: {
+    sensitivityScore: 0,
+    complexityScore: 0,
+    coverageGap: 0,
+    defectHistory: 0,
+  },
+  riskReasons: [],
+  changedSymbols: [],
+});
+
+async function resolveCommitSha(
+  repoRoot: string,
+  ref: string,
+): Promise<string> {
+  const result = await runCommand(
+    "git",
+    ["rev-parse", "--verify", `${ref}^{commit}`],
+    { cwd: repoRoot },
+  );
+  return result.stdout.trim();
+}
+
+async function verifyDistinctRevisions(options: CatchCommandOptions): Promise<{
+  baseSha: string;
+  headSha: string;
+  sameRevision: boolean;
+}> {
+  const [baseSha, headSha] = await Promise.all([
+    resolveCommitSha(options.cwd, options.base),
+    resolveCommitSha(options.cwd, options.head),
+  ]);
+
+  return {
+    baseSha,
+    headSha,
+    sameRevision: baseSha === headSha,
+  };
+}
 
 const loadDiffWithRisk = async (
   options: CatchCommandOptions,
+  config: ReturnType<typeof createCommandConfig>,
+  revisions: {
+    baseSha: string;
+    headSha: string;
+  },
 ): Promise<{
   diff: DiffContext;
   diffMs: number;
@@ -155,24 +237,33 @@ const loadDiffWithRisk = async (
   logger.info("Extracting diff context...");
   const diffStart = Date.now();
   const diffContext = await extractDiffContext({
-    baseRef: options.base,
-    headRef: options.head,
+    baseRef: revisions.baseSha,
+    headRef: revisions.headSha,
     cwd: options.cwd,
     prTitle: options.prTitle,
     prBody: options.prBody,
-    include: options.include,
-    exclude: options.exclude,
+    include: config.include,
+    exclude: config.exclude,
   });
   const additionalContext = await loadIntentContext(
     options.cwd,
-    options.contextFiles,
+    config.contextFiles,
+    {
+      optionalContextFiles: config.autoContext ? config.autoContextFiles : [],
+    },
   );
 
   return {
-    diff: await applyRiskAnalysis(options.cwd, {
-      ...diffContext,
-      additionalContext,
-    }),
+    diff: await applyRiskAnalysis(
+      options.cwd,
+      {
+        ...diffContext,
+        additionalContext,
+      },
+      {
+        sensitivityGlobs: config.sensitivityGlobs,
+      },
+    ),
     diffMs: Date.now() - diffStart,
   };
 };
@@ -286,6 +377,10 @@ const buildRunStats = (input: {
 
 const executeInWorktrees = async (input: {
   options: CatchCommandOptions;
+  revisions: {
+    baseSha: string;
+    headSha: string;
+  };
   config: ReturnType<typeof createCommandConfig>;
   allTests: readonly GeneratedTest[];
 }): Promise<{
@@ -300,8 +395,8 @@ const executeInWorktrees = async (input: {
   const execStart = Date.now();
   const worktrees = await setupWorktrees(
     input.options.cwd,
-    input.options.base,
-    input.options.head,
+    input.revisions.baseSha,
+    input.revisions.headSha,
   );
 
   try {
@@ -489,6 +584,10 @@ const assessWeakCatches = async (input: {
 
 const executeCatchWorkflow = async (input: {
   options: CatchCommandOptions;
+  revisions: {
+    baseSha: string;
+    headSha: string;
+  };
   diff: DiffContext;
   llm: LLMClient;
   config: ReturnType<typeof createCommandConfig>;
@@ -504,6 +603,7 @@ const executeCatchWorkflow = async (input: {
 }> => {
   const executed = await executeInWorktrees({
     options: input.options,
+    revisions: input.revisions,
     config: input.config,
     allTests: input.allTests,
   });
@@ -571,6 +671,41 @@ const createNoTestsResult = (
     "No tests were generated for the current diff.",
   );
 
+const createNoMatchingFilesResult = (
+  options: CatchCommandOptions,
+  config: ReturnType<typeof createCommandConfig>,
+  diff: DiffContext,
+): CatchCommandResult =>
+  createResult(
+    options,
+    config.workflow,
+    config.riskThreshold,
+    diff,
+    false,
+    [],
+    [],
+    null,
+    "No matching changed files were found for the current diff.",
+  );
+
+const createSameRevisionResult = (
+  options: CatchCommandOptions,
+  baseSha: string,
+  headSha: string,
+): CatchCommandResult =>
+  createResult(
+    options,
+    options.workflow,
+    options.riskThreshold,
+    emptyDiff(options, baseSha, headSha),
+    false,
+    [],
+    [],
+    null,
+    `Base and head both resolve to ${baseSha}; nothing to analyze.`,
+    sameRevisionExitCode,
+  );
+
 const buildNoExecutionStats = (input: {
   diff: DiffContext;
   diffMs: number;
@@ -594,13 +729,27 @@ const buildNoExecutionStats = (input: {
     llmStats: input.llmStats,
   });
 
-export const createCatchCommandResult = async (
+const createCatchCommandResult = async (
   options: CatchCommandOptions,
 ): Promise<CatchCommandResult> => {
   const startTime = Date.now();
   const runId = randomUUID();
+  const revisions = await verifyDistinctRevisions(options);
+
+  if (revisions.sameRevision) {
+    return createSameRevisionResult(
+      options,
+      revisions.baseSha,
+      revisions.headSha,
+    );
+  }
+
   const config = createCommandConfig(options);
-  const { diff, diffMs } = await loadDiffWithRisk(options);
+  const { diff, diffMs } = await loadDiffWithRisk(options, config, revisions);
+
+  if (diff.files.length === 0) {
+    return createNoMatchingFilesResult(options, config, diff);
+  }
 
   if (diff.riskScore < config.riskThreshold) {
     return createSkippedResult(options, config, diff);
@@ -642,6 +791,7 @@ export const createCatchCommandResult = async (
 
   const executed = await executeCatchWorkflow({
     options,
+    revisions,
     diff,
     llm,
     config,
@@ -664,60 +814,127 @@ export const createCatchCommandResult = async (
   );
 };
 
-export const runCatchCommand = async (
-  options: CatchCommandOptions,
-): Promise<void> => {
-  const result = await createCatchCommandResult(options);
+function shouldFailOnReports(
+  reports: readonly BehaviorReport[],
+  failOn: CatchCommandOptions["failOn"],
+): boolean {
+  if (failOn === undefined || reports.length === 0) {
+    return false;
+  }
 
-  if (options.output === "github-comment") {
-    const comment = formatPRComment(
+  if (failOn === "any-report") {
+    return true;
+  }
+
+  const threshold = verdictRank[failOn];
+  return reports.some(
+    (report) => verdictRank[report.details.verdict] >= threshold,
+  );
+}
+
+function renderConsoleResult(result: CatchCommandResult): string {
+  return formatCatchResult({
+    baseRef: result.baseRef,
+    headRef: result.headRef,
+    workflow: result.workflow,
+    riskThreshold: result.riskThreshold,
+    eligibleForGeneration: result.eligibleForGeneration,
+    fileCount: result.diff.files.length,
+    riskScore: result.diff.riskScore,
+    riskReasons: result.diff.riskReasons ?? [],
+    totalTestsGenerated: result.stats?.totalTestsGenerated,
+    weakCatchCount: result.stats?.weakCatchCount,
+    hardeningCandidateCount: result.stats?.hardeningCandidateCount,
+    reportsGenerated: result.stats?.reportsGenerated,
+    duration: result.stats?.duration,
+    estimatedCost: result.stats?.estimatedCost,
+    llmUsage: result.stats?.llmUsage,
+    statusMessage: result.statusMessage,
+    reports: result.stats ? result.reports : undefined,
+  }).trimEnd();
+}
+
+function renderOutput(
+  result: CatchCommandResult,
+  output: CatchCommandOptions["output"],
+): string {
+  if (output === "github-comment") {
+    return formatPRComment(result.reports, result.stats, result.statusMessage);
+  }
+
+  if (output === "github-step-summary") {
+    return formatGithubStepSummary(
       result.reports,
       result.stats,
       result.statusMessage,
     );
-
-    if (comment.length > 0) {
-      writeStdout(comment);
-    }
-
-    return;
   }
 
-  if (options.output === "json") {
-    writeStdout(
-      formatJsonReport(
-        result.reports,
-        result.stats,
-        result.statusMessage,
-        result.hardeningCandidates,
-      ),
+  if (output === "json") {
+    return formatJsonReport(
+      result.reports,
+      result.stats,
+      result.statusMessage,
+      result.hardeningCandidates,
     );
-
-    return;
   }
 
-  writeStdout(
-    formatCatchResult({
-      baseRef: result.baseRef,
-      headRef: result.headRef,
-      workflow: result.workflow,
-      riskThreshold: result.riskThreshold,
-      eligibleForGeneration: result.eligibleForGeneration,
-      fileCount: result.diff.files.length,
-      riskScore: result.diff.riskScore,
-      riskReasons: result.diff.riskReasons ?? [],
-      totalTestsGenerated: result.stats?.totalTestsGenerated,
-      weakCatchCount: result.stats?.weakCatchCount,
-      hardeningCandidateCount: result.stats?.hardeningCandidateCount,
-      reportsGenerated: result.stats?.reportsGenerated,
-      duration: result.stats?.duration,
-      estimatedCost: result.stats?.estimatedCost,
-      llmUsage: result.stats?.llmUsage,
-      statusMessage: result.statusMessage,
-      reports: result.stats ? result.reports : undefined,
-    }).trimEnd(),
-  );
+  return renderConsoleResult(result);
+}
+
+async function writeSideOutputs(
+  options: CatchCommandOptions,
+  result: CatchCommandResult,
+): Promise<void> {
+  if (options.jsonFile !== undefined) {
+    await writeOutputFile(
+      options.cwd,
+      options.jsonFile,
+      renderOutput(result, "json"),
+    );
+  }
+
+  if (options.summaryFile !== undefined) {
+    await writeOutputFile(
+      options.cwd,
+      options.summaryFile,
+      renderOutput(result, "github-step-summary"),
+    );
+  }
+
+  if (options.commentFile !== undefined) {
+    await writeOutputFile(
+      options.cwd,
+      options.commentFile,
+      renderOutput(result, "github-comment"),
+    );
+  }
+}
+
+const runCatchCommand = async (options: CatchCommandOptions): Promise<void> => {
+  const result = await createCatchCommandResult(options);
+  await writeSideOutputs(options, result);
+
+  const output = renderOutput(result, options.output);
+  if (output.length > 0) {
+    writeStdout(output);
+  }
+
+  if (result.exitCode !== undefined) {
+    process.exitCode = result.exitCode;
+  } else if (shouldFailOnReports(result.reports, options.failOn)) {
+    process.exitCode = findingsExitCode;
+  }
 };
 
 export type { CatchCommandResult };
-export { selectAssessmentExecutionLog };
+export {
+  createCatchCommandResult,
+  findingsExitCode,
+  renderOutput,
+  runCatchCommand,
+  sameRevisionExitCode,
+  selectAssessmentExecutionLog,
+  shouldFailOnReports,
+  verifyDistinctRevisions,
+};

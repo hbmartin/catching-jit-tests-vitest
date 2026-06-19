@@ -94,30 +94,32 @@ labels.
 The intended loop is:
 
 1. Run `jittest` in CI. Records get appended.
-2. After triage, mark records by hand or via a lightweight tool.
+2. After triage, mark records with `jittest triage`.
 3. Periodically analyze the records to:
    - measure precision at your current `--report-threshold`,
    - tune the threshold up or down,
    - identify common false-positive patterns to add to
      [`rubfake`](../source/assessors/rubfake.ts).
 
-A minimal labelling script:
+List records from a run:
 
-```ts
-import { readFileSync, writeFileSync } from "node:fs";
+```sh
+jittest triage --run-id "$RUN_ID" --list
+```
 
-const lines = readFileSync(".jittest/assessment-records.jsonl", "utf-8")
-  .split("\n")
-  .filter(Boolean);
+Label all records from a run:
 
-const labelled = lines.map((line) => {
-  const record = JSON.parse(line);
-  // ... show to a human, collect verdict, mutate engineerFeedback
-  return JSON.stringify(record);
-});
+```sh
+jittest triage \
+  --run-id "$RUN_ID" \
+  --label confirmed-false-positive \
+  --notes "generated test asserted an implementation detail"
+```
 
-writeFileSync(".jittest/assessment-records.labelled.jsonl",
-  labelled.join("\n") + "\n");
+For local review, use interactive prompts:
+
+```sh
+jittest triage --run-id "$RUN_ID" --interactive
 ```
 
 ## Persisting records across CI runs

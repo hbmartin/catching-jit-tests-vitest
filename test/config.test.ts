@@ -55,6 +55,13 @@ describe("createDefaultConfig", () => {
     expect(config.llmJudgeEnabled).toBe(true);
     expect(config.outputFormat).toBe("console");
     expect(config.contextFiles).toEqual([]);
+    expect(config.autoContext).toBe(true);
+    expect(config.autoContextFiles).toEqual([
+      "AGENTS.md",
+      "CLAUDE.md",
+      "CONTRIBUTING.md",
+    ]);
+    expect(config.sensitivityGlobs).toEqual([]);
     expect(config.include).toEqual(["src/**/*.ts", "source/**/*.ts"]);
     expect(config.exclude).toEqual([
       "**/*.test.ts",
@@ -152,6 +159,36 @@ describe("loadConfig", () => {
     process.env.OPENROUTER_MODEL = "meta-llama/llama-4";
 
     expect(loadConfig().llm.model).toBe("meta-llama/llama-4");
+  });
+
+  it("accepts an explicit env map for deterministic tests", () => {
+    const config = loadConfig(
+      {},
+      {
+        env: {
+          OPENROUTER_API_KEY: "map-key",
+          OPENROUTER_MODEL: "map-model",
+        },
+      },
+    );
+
+    expect(config.llm.apiKey).toBe("map-key");
+    expect(config.llm.model).toBe("map-model");
+  });
+
+  it("can ignore process env and use file config only", () => {
+    const config = loadConfig(
+      {
+        llm: {
+          apiKey: "file-key",
+          model: "file-model",
+        },
+      },
+      { ignoreEnv: true },
+    );
+
+    expect(config.llm.apiKey).toBe("file-key");
+    expect(config.llm.model).toBe("file-model");
   });
 });
 
@@ -477,6 +514,31 @@ describe("loadConfig with a config file", () => {
     }
   });
 
+  it("reads auto context and sensitivity globs from config", () => {
+    writeConfig({
+      autoContext: false,
+      autoContextFiles: ["AGENTS.md", "docs/architecture.md"],
+      sensitivityGlobs: [
+        {
+          label: "memberships",
+          pattern: "modules/memberships/**",
+          weight: 0.95,
+        },
+      ],
+    });
+
+    const config = loadConfig({}, { cwd: dir });
+
+    expect(config.autoContext).toBe(false);
+    expect(config.autoContextFiles).toEqual([
+      "AGENTS.md",
+      "docs/architecture.md",
+    ]);
+    expect(config.sensitivityGlobs).toEqual([
+      { label: "memberships", pattern: "modules/memberships/**", weight: 0.95 },
+    ]);
+  });
+
   it("lets CLI llm overrides win over environment provider", () => {
     process.env.LLM_PROVIDER = "openai-compatible";
     try {
@@ -499,6 +561,10 @@ describe("parseCatchCommandOptions", () => {
     expect(options.head).toBe("HEAD");
     expect(options.workflow).toBe("both");
     expect(options.output).toBe("console");
+    expect(options.failOn).toBeUndefined();
+    expect(options.jsonFile).toBeUndefined();
+    expect(options.summaryFile).toBeUndefined();
+    expect(options.commentFile).toBeUndefined();
     expect(options.cwd).toBe(".");
     expect(options.contextFiles).toEqual([]);
     expect(options.maxTotalTests).toBe(50);
@@ -586,5 +652,25 @@ describe("parseCatchCommandOptions", () => {
     });
 
     expect(options.llmModel).toBe("anthropic/claude-sonnet-4");
+  });
+
+  it("accepts fail-on and multi-output paths", () => {
+    const options = parseCatchCommandOptions({
+      output: "github-step-summary",
+      failOn: "likely-strong",
+      jsonFile: "report.json",
+      summaryFile: "summary.md",
+      commentFile: "comment.md",
+      autoContextFiles: ["docs/risk.md"],
+      noAutoContext: true,
+    });
+
+    expect(options.output).toBe("github-step-summary");
+    expect(options.failOn).toBe("likely-strong");
+    expect(options.jsonFile).toBe("report.json");
+    expect(options.summaryFile).toBe("summary.md");
+    expect(options.commentFile).toBe("comment.md");
+    expect(options.autoContextFiles).toEqual(["docs/risk.md"]);
+    expect(options.noAutoContext).toBe(true);
   });
 });

@@ -196,7 +196,13 @@ const defaultLlmUsage = {
   events: [],
 };
 
-const mockCatchDependencies = (riskScore = 0.8) => {
+const mockCatchDependencies = (
+  riskScore = 0.8,
+  revisions = {
+    baseSha: "base-sha",
+    headSha: "head-sha",
+  },
+) => {
   const diffWithoutRisk = makeDiff(0);
   const diffWithRisk = makeDiff(riskScore);
   const cleanupMock = vi.fn().mockResolvedValue(undefined);
@@ -245,6 +251,19 @@ const mockCatchDependencies = (riskScore = 0.8) => {
       .fn()
       .mockReturnValue({ id: "record" }),
     generateBehaviorReportMock: vi.fn().mockReturnValue(report),
+    runCommandMock: vi
+      .fn()
+      .mockImplementation(async (_command: string, args: readonly string[]) => {
+        const [, , ref] = args;
+        return {
+          stdout:
+            ref === "origin/main^{commit}"
+              ? `${revisions.baseSha}\n`
+              : `${revisions.headSha}\n`,
+          stderr: "",
+          exitCode: 0,
+        };
+      }),
     LLMClientMock: vi.fn(function LLMClientMock() {
       return {
         getStats: getStatsMock,
@@ -301,6 +320,9 @@ const mockCatchDependencies = (riskScore = 0.8) => {
   vi.doMock("../../source/utils/llm-client.js", () => ({
     LLMClient: mocks.LLMClientMock,
   }));
+  vi.doMock("../../source/utils/process.js", () => ({
+    runCommand: mocks.runCommandMock,
+  }));
 
   return mocks;
 };
@@ -325,7 +347,29 @@ describe("createCatchCommandResult", () => {
     expect(mocks.applyRiskAnalysisMock).toHaveBeenCalledWith(
       mockRepoDir,
       expect.objectContaining({ additionalContext: "loaded context" }),
+      expect.objectContaining({ sensitivityGlobs: [] }),
     );
+  });
+
+  it("fast-exits when base and head resolve to the same commit", async () => {
+    const mocks = mockCatchDependencies(0.9, {
+      baseSha: "same-sha",
+      headSha: "same-sha",
+    });
+    const { createCatchCommandResult, sameRevisionExitCode } = await import(
+      "../../source/commands/catch.js"
+    );
+
+    const result = await createCatchCommandResult(makeOptions());
+
+    expect(result).toMatchObject({
+      eligibleForGeneration: false,
+      exitCode: sameRevisionExitCode,
+      statusMessage:
+        "Base and head both resolve to same-sha; nothing to analyze.",
+    });
+    expect(mocks.extractDiffContextMock).not.toHaveBeenCalled();
+    expect(mocks.LLMClientMock).not.toHaveBeenCalled();
   });
 
   it("returns a no-tests result when generation produces nothing", async () => {
@@ -393,6 +437,11 @@ describe("createCatchCommandResult", () => {
       parentWorktreeDir,
       childWorktreeDir,
       true,
+    );
+    expect(mocks.setupWorktreesMock).toHaveBeenCalledWith(
+      mockRepoDir,
+      "base-sha",
+      "head-sha",
     );
     expect(mocks.dualExecutionMock).toHaveBeenCalledWith(
       [dodgyTest, intentTest],
@@ -506,6 +555,34 @@ describe("runCatchCommand", () => {
     expect(writeSpy).toHaveBeenCalledWith(
       expect.stringContaining('"statusMessage": "No tests were generated'),
     );
+  });
+
+  it("sets exit code 2 when --fail-on matches a reported verdict", async () => {
+    const mocks = mockCatchDependencies(0.95);
+    const dodgyTest = makeGeneratedTest(
+      "dodgy-diff",
+      "test/dodgy.jittest.test.ts",
+    );
+    mocks.dodgyDiffWorkflowMock.mockResolvedValue([dodgyTest]);
+    mocks.dualExecutionMock.mockResolvedValue([
+      makeDualResult(dodgyTest, "failed"),
+    ]);
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+    const { findingsExitCode, runCatchCommand } = await import(
+      "../../source/commands/catch.js"
+    );
+    const previousExitCode = process.exitCode;
+
+    try {
+      process.exitCode = undefined;
+      await runCatchCommand(makeOptions({ failOn: "likely-strong" }));
+      expect(process.exitCode).toBe(findingsExitCode);
+    } finally {
+      process.exitCode = previousExitCode;
+      writeSpy.mockRestore();
+    }
   });
 
   it("writes console summaries", async () => {

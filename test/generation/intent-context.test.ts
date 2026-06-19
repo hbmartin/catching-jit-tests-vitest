@@ -1,13 +1,13 @@
 import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
-
+import { describe, expect, it, vi } from "vitest";
 import {
   loadIntentContext,
   maxContextFileBytes,
   truncateContext,
 } from "../../source/generation/intent-context.js";
+import { logger } from "../../source/utils/logger.js";
 
 describe("intent context", () => {
   it("loads local context files as titled sections", async () => {
@@ -22,6 +22,41 @@ describe("intent context", () => {
 
     expect(context).toContain("### issue.md");
     expect(context).toContain("keep refresh tokens valid");
+  });
+
+  it("loads optional auto context files when present", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "jittest-context-"));
+    await writeFile(
+      path.join(repoRoot, "AGENTS.md"),
+      "Use domain invariants from this repo.",
+      "utf-8",
+    );
+
+    const context = await loadIntentContext(repoRoot, [], {
+      optionalContextFiles: ["AGENTS.md", "CLAUDE.md"],
+    });
+
+    expect(context).toContain("### AGENTS.md");
+    expect(context).toContain("domain invariants");
+    expect(context).not.toContain("CLAUDE.md");
+  });
+
+  it("does not warn for missing optional auto context files", async () => {
+    const repoRoot = await mkdtemp(path.join(tmpdir(), "jittest-context-"));
+    const warnSpy = vi
+      .spyOn(logger, "warn")
+      .mockImplementation(() => undefined);
+
+    try {
+      const context = await loadIntentContext(repoRoot, [], {
+        optionalContextFiles: ["AGENTS.md"],
+      });
+
+      expect(context).toBe("");
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it("truncates large context values", () => {

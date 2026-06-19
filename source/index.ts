@@ -5,12 +5,28 @@ export type {
   JudgeInput,
   JudgeOutput,
 } from "./assessors/types.js";
-export type { JiTTestConfig } from "./config.js";
+export { renderReport, runFormatCommand } from "./commands/format.js";
+export { runTriageCommand } from "./commands/triage.js";
+export type {
+  FormatCommandOptions,
+  JiTTestConfig,
+  SensitivityGlob,
+  TriageCommandOptions,
+} from "./config.js";
 export {
   createDefaultConfig,
+  defaultAutoContextFiles,
+  failOnVerdictSchema,
+  formatCommandOptionsSchema,
   loadConfig,
   outputFormatSchema,
   parseCatchCommandOptions,
+  parseFormatCommandOptions,
+  parseTriageCommandOptions,
+  savedReportFormatSchema,
+  sensitivityGlobSchema,
+  triageCommandOptionsSchema,
+  triageLabelSchema,
   workflowSchema,
 } from "./config.js";
 export { analyzeFileChanges } from "./diff/ast-analyzer.js";
@@ -67,7 +83,8 @@ export {
   formatCatchResult,
 } from "./reporting/console.js";
 export { formatPRComment } from "./reporting/github-comment.js";
-export { formatJsonReport } from "./reporting/json-report.js";
+export { formatGithubStepSummary } from "./reporting/github-step-summary.js";
+export { formatJsonReport, jsonReportSchema } from "./reporting/json-report.js";
 export type {
   BehaviorReport,
   RunStats,
