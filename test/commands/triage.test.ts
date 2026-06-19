@@ -118,6 +118,34 @@ describe("runTriageCommand", () => {
     expect(updatedSecond.engineerFeedback.label).toBe("unknown");
   });
 
+  it("preserves the original bytes of records it does not relabel", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "jittest-triage-"));
+    const feedbackPath = path.join(dir, "records.jsonl");
+    // A record with an extra field the schema does not model, plus a blank line.
+    const untouched = JSON.stringify({
+      ...makeRecord("run-2"),
+      extraField: "must-survive",
+    });
+    const target = JSON.stringify(makeRecord("run-1"));
+    await writeFile(feedbackPath, `${target}\n${untouched}\n`, "utf-8");
+
+    await runTriageCommand({
+      cwd: dir,
+      feedbackPath,
+      runId: "run-1",
+      label: "confirmed-true-positive",
+      list: false,
+      interactive: false,
+    });
+
+    const [, secondLine] = (await readFile(feedbackPath, "utf-8"))
+      .trim()
+      .split("\n");
+    // The non-matched line is rewritten verbatim, including the unknown field.
+    expect(secondLine).toBe(untouched);
+    expect(JSON.parse(secondLine).extraField).toBe("must-survive");
+  });
+
   it("lists matching records", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "jittest-triage-"));
     const feedbackPath = path.join(dir, "records.jsonl");

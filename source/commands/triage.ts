@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import process from "node:process";
-import { createInterface } from "node:readline/promises";
+import { createInterface, type Interface } from "node:readline/promises";
 
 import type { TriageCommandOptions } from "../config.js";
 import {
@@ -15,6 +15,7 @@ type TriageLabel = NonNullable<TriageCommandOptions["label"]>;
 interface FeedbackLine {
   readonly raw: string;
   record: AssessmentFeedbackRecord | null;
+  dirty: boolean;
 }
 
 const labelChoices: readonly TriageLabel[] = [
@@ -34,11 +35,13 @@ function parseFeedbackLine(raw: string): FeedbackLine {
     return {
       raw,
       record: parsed.success ? parsed.data : null,
+      dirty: false,
     };
   } catch {
     return {
       raw,
       record: null,
+      dirty: false,
     };
   }
 }
@@ -119,9 +122,14 @@ async function writeFeedbackLines(
   feedbackPath: string,
   lines: readonly FeedbackLine[],
 ): Promise<void> {
+  // Only re-serialize records we actually relabeled. Untouched lines keep their
+  // original bytes, so unknown/extra fields survive round-trips and the file
+  // doesn't churn for records outside the --id/--run-id selection.
   const serialized = lines
     .map((line) =>
-      line.record === null ? line.raw : JSON.stringify(line.record),
+      line.dirty && line.record !== null
+        ? JSON.stringify(line.record)
+        : line.raw,
     )
     .join("\n");
   await writeFile(feedbackPath, `${serialized}\n`, "utf-8");
@@ -129,8 +137,37 @@ async function writeFeedbackLines(
 
 /* istanbul ignore next -- terminal-only interactive prompt */
 async function promptForLabel(
+  rl: Interface,
   record: AssessmentFeedbackRecord,
 ): Promise<TriageLabel | null> {
+  writeStdout("");
+  writeStdout(`${record.id} ${record.assessment.verdict}`);
+  writeStdout(record.weakCatch.behaviorChange.summary);
+  const answer = await rl.question(
+    "Label: [t] true positive, [f] false positive, [i] intended, [u] unknown, [s] skip > ",
+  );
+  const normalized = answer.trim().toLowerCase();
+  if (normalized === "t") {
+    return "confirmed-true-positive";
+  }
+  if (normalized === "f") {
+    return "confirmed-false-positive";
+  }
+  if (normalized === "i") {
+    return "intended-change";
+  }
+  if (normalized === "u") {
+    return "unknown";
+  }
+  return null;
+}
+
+/* istanbul ignore next -- terminal-only interactive prompt */
+async function applyInteractiveLabels(
+  lines: FeedbackLine[],
+  records: readonly AssessmentFeedbackRecord[],
+  options: TriageCommandOptions,
+): Promise<number> {
   if (!process.stdin.isTTY) {
     throw new Error("Interactive triage requires a TTY");
   }
@@ -140,50 +177,23 @@ async function promptForLabel(
     output: process.stdout,
   });
 
-  try {
-    writeStdout("");
-    writeStdout(`${record.id} ${record.assessment.verdict}`);
-    writeStdout(record.weakCatch.behaviorChange.summary);
-    const answer = await rl.question(
-      "Label: [t] true positive, [f] false positive, [i] intended, [u] unknown, [s] skip > ",
-    );
-    const normalized = answer.trim().toLowerCase();
-    if (normalized === "t") {
-      return "confirmed-true-positive";
-    }
-    if (normalized === "f") {
-      return "confirmed-false-positive";
-    }
-    if (normalized === "i") {
-      return "intended-change";
-    }
-    if (normalized === "u") {
-      return "unknown";
-    }
-    return null;
-  } finally {
-    rl.close();
-  }
-}
-
-/* istanbul ignore next -- terminal-only interactive prompt */
-async function applyInteractiveLabels(
-  lines: FeedbackLine[],
-  records: readonly AssessmentFeedbackRecord[],
-  options: TriageCommandOptions,
-): Promise<number> {
   let updated = 0;
-  for (const record of records) {
-    const label = await promptForLabel(record);
-    if (label !== null) {
-      for (const line of lines) {
-        if (line.record?.id === record.id) {
-          line.record = applyLabel(line.record, label, options.notes);
-          updated += 1;
-          break;
+  try {
+    for (const record of records) {
+      const label = await promptForLabel(rl, record);
+      if (label !== null) {
+        for (const line of lines) {
+          if (line.record?.id === record.id) {
+            line.record = applyLabel(line.record, label, options.notes);
+            line.dirty = true;
+            updated += 1;
+            break;
+          }
         }
       }
     }
+  } finally {
+    rl.close();
   }
 
   return updated;
@@ -205,6 +215,7 @@ function applyNonInteractiveLabel(
   for (const line of lines) {
     if (line.record !== null && matchesSelection(line.record, options)) {
       line.record = applyLabel(line.record, options.label, options.notes);
+      line.dirty = true;
       updated += 1;
     }
   }

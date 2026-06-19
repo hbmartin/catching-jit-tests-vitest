@@ -690,13 +690,14 @@ const createNoMatchingFilesResult = (
 
 const createSameRevisionResult = (
   options: CatchCommandOptions,
+  config: ReturnType<typeof createCommandConfig>,
   baseSha: string,
   headSha: string,
 ): CatchCommandResult =>
   createResult(
     options,
-    options.workflow,
-    options.riskThreshold,
+    config.workflow,
+    config.riskThreshold,
     emptyDiff(options, baseSha, headSha),
     false,
     [],
@@ -734,17 +735,18 @@ const createCatchCommandResult = async (
 ): Promise<CatchCommandResult> => {
   const startTime = Date.now();
   const runId = randomUUID();
+  const config = createCommandConfig(options);
   const revisions = await verifyDistinctRevisions(options);
 
   if (revisions.sameRevision) {
     return createSameRevisionResult(
       options,
+      config,
       revisions.baseSha,
       revisions.headSha,
     );
   }
 
-  const config = createCommandConfig(options);
   const { diff, diffMs } = await loadDiffWithRisk(options, config, revisions);
 
   if (diff.files.length === 0) {
