@@ -249,6 +249,10 @@ const loadDiffWithRisk = async (
     ...extractedDiffContext,
     pr: {
       ...extractedDiffContext.pr,
+      // extractDiffContext was called with resolved SHAs, so its pr.branch is
+      // the head SHA; restore the human-readable ref the caller requested.
+      // Pin baseSha/headSha to the resolved revisions so diff.pr always reports
+      // them, independent of how extractDiffContext populates its own pr.
       branch: options.head,
       baseSha: revisions.baseSha,
       headSha: revisions.headSha,

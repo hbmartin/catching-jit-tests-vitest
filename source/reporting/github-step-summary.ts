@@ -4,9 +4,7 @@ function escapeMarkdownCell(value: string): string {
   return value
     .replaceAll("\\", "\\\\")
     .replaceAll("|", "\\|")
-    .replaceAll("\r\n", "<br>")
-    .replaceAll("\n", "<br>")
-    .replaceAll("\r", "<br>");
+    .replace(/\r?\n|\r/g, "<br>");
 }
 
 function formatMetricLine(stats: RunStats | null): string {
