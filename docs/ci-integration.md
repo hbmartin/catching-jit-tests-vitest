@@ -46,11 +46,11 @@ over.
 
 4. **Permissions to comment** if you want PR comments posted:
 
-	   ```yaml
-	   permissions:
-	     contents: read
-	     pull-requests: write
-	   ```
+   ```yaml
+   permissions:
+     contents: read
+     pull-requests: write
+   ```
 
    For a read-only artifact + step-summary workflow, `contents: read` is enough.
 
@@ -100,18 +100,18 @@ jobs:
           OPENROUTER_MODEL: anthropic/claude-sonnet-4
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
-	        run: |
-	          pnpm exec jittest catch \
-	            --base "origin/${{ github.base_ref }}" \
-	            --head HEAD \
-	            --pr-title "$PR_TITLE" \
-	            --pr-body "$PR_BODY" \
-	            --risk-threshold 0.25 \
-	            --report-threshold 0.4 \
-	            --output console \
-	            --json-file jittest-report.json \
-	            --comment-file jittest-comment.md \
-	            --summary-file "$GITHUB_STEP_SUMMARY"
+        run: |
+          pnpm exec jittest catch \
+            --base "origin/${{ github.base_ref }}" \
+            --head HEAD \
+            --pr-title "$PR_TITLE" \
+            --pr-body "$PR_BODY" \
+            --risk-threshold 0.25 \
+            --report-threshold 0.4 \
+            --output console \
+            --json-file jittest-report.json \
+            --comment-file jittest-comment.md \
+            --summary-file "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -219,9 +219,9 @@ just emits Markdown. For GitLab, Buildkite, Jenkins, etc.:
   `pull_request_target` with care, or run `jittest` only on PRs from the
   same repository (`if: github.event.pull_request.head.repo.full_name == github.repository`).
 - **Comment never posts.** Check `jittest-comment.md` is non-empty *and*
-	  the workflow has `pull-requests: write` *and* the bot account isn't
-	  rate-limited. The CLI deliberately emits empty output when there are
-	  no reportable catches and no status message; that is not a bug.
+  the workflow has `pull-requests: write` *and* the bot account isn't
+  rate-limited. The CLI deliberately emits empty output when there are
+  no reportable catches and no status message; that is not a bug.
 - **Exit code 3.** `--base` and `--head` resolved to the same commit. The CLI
   exited before diff extraction, LLM calls, worktree setup, or dependency
   installation.

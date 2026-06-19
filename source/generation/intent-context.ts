@@ -72,7 +72,7 @@ async function loadIntentContext(
             sections.push(
               `### ${contextFile}\n${truncateContext(content.trim())}`,
             );
-          } else {
+          } else if (!optional) {
             logger.warn(
               `Skipping out-of-repo intent context file: ${contextFile}`,
             );
