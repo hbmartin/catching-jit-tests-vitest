@@ -40,6 +40,10 @@ back here.
 - [`upgrade-0.1.0-to-0.2.0.md`](./upgrade-0.1.0-to-0.2.0.md) — migrating off the
   Anthropic provider onto OpenRouter, the new required model id, and the cost /
   token budgeting added in 0.2.0.
+- [`upgrade-0.2.0-to-0.3.0.md`](./upgrade-0.2.0-to-0.3.0.md) — the
+  `jittest.config.json` config file, the `openai-compatible` provider and
+  bring-your-own AI SDK model, the on-disk LLM cache, parallel assessment, the
+  flake guard, and the new `jittest calibrate` command.
 
 ## Mental model in one paragraph
 

@@ -83,6 +83,22 @@ Risk threshold is a cost knob, not a quality knob. Setting it too high
 just means you never run on small bug fixes — which are often exactly the
 diffs that benefit most.
 
+For monorepos, teach the scorer your own sensitive paths before raising the
+threshold too aggressively:
+
+```json
+{
+  "sensitivityGlobs": [
+    { "label": "memberships", "pattern": "modules/memberships/**", "weight": 0.95 },
+    { "label": "webhooks", "pattern": "src/webhooks/**", "weight": 0.9 },
+    { "label": "consent-rate-limit", "pattern": "src/consent/rate-limit/**", "weight": 0.9 }
+  ]
+}
+```
+
+These rules raise the sensitivity component for matching files and add a risk
+reason to the final report.
+
 ## `--tests-per-function`
 
 This sets the number of LLM-generated candidates per changed function or

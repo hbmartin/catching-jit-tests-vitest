@@ -11,9 +11,16 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { isDirectExecution, runCli } from "../source/cli.js";
 import { cliVersion } from "../source/version.js";
 
-const { runCatchCommandMock, runCalibrateCommandMock } = vi.hoisted(() => ({
+const {
+  runCatchCommandMock,
+  runCalibrateCommandMock,
+  runFormatCommandMock,
+  runTriageCommandMock,
+} = vi.hoisted(() => ({
   runCatchCommandMock: vi.fn(),
   runCalibrateCommandMock: vi.fn(),
+  runFormatCommandMock: vi.fn(),
+  runTriageCommandMock: vi.fn(),
 }));
 
 vi.mock("../source/commands/catch.js", () => ({
@@ -22,6 +29,14 @@ vi.mock("../source/commands/catch.js", () => ({
 
 vi.mock("../source/commands/calibrate.js", () => ({
   runCalibrateCommand: runCalibrateCommandMock,
+}));
+
+vi.mock("../source/commands/format.js", () => ({
+  runFormatCommand: runFormatCommandMock,
+}));
+
+vi.mock("../source/commands/triage.js", () => ({
+  runTriageCommand: runTriageCommandMock,
 }));
 
 const cliRepoPath = path.join(process.cwd(), ".jittest", "cli-repo");
@@ -40,6 +55,8 @@ describe("runCli", () => {
   beforeEach(() => {
     runCatchCommandMock.mockReset();
     runCalibrateCommandMock.mockReset();
+    runFormatCommandMock.mockReset();
+    runTriageCommandMock.mockReset();
   });
 
   it("prints help for empty input", async () => {
@@ -192,6 +209,48 @@ describe("runCli", () => {
     );
   });
 
+  it("drops a standalone double dash before parsing catch flags", async () => {
+    await runCli(["catch", "--", "--base", "main", "--output", "json"]);
+
+    expect(runCatchCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        base: "main",
+        output: "json",
+      }),
+    );
+  });
+
+  it("passes catch gating and side-output options", async () => {
+    await runCli([
+      "catch",
+      "--output",
+      "github-step-summary",
+      "--fail-on",
+      "likely-strong",
+      "--json-file",
+      "jittest-report.json",
+      "--summary-file",
+      "jittest-summary.md",
+      "--comment-file",
+      "jittest-comment.md",
+      "--auto-context-file",
+      "docs/risk.md",
+      "--no-auto-context",
+    ]);
+
+    expect(runCatchCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        output: "github-step-summary",
+        failOn: "likely-strong",
+        jsonFile: "jittest-report.json",
+        summaryFile: "jittest-summary.md",
+        commentFile: "jittest-comment.md",
+        autoContextFiles: ["docs/risk.md"],
+        noAutoContext: true,
+      }),
+    );
+  });
+
   it("dispatches the calibrate command with parsed options", async () => {
     await runCli([
       "calibrate",
@@ -220,6 +279,45 @@ describe("runCli", () => {
     expect(writeSpy).toHaveBeenCalled();
     expect(runCalibrateCommandMock).not.toHaveBeenCalled();
     writeSpy.mockRestore();
+  });
+
+  it("dispatches the format command with positional input", async () => {
+    await runCli([
+      "format",
+      "jittest-report.json",
+      "--output",
+      "github-step-summary",
+      "--out",
+      "summary.md",
+    ]);
+
+    expect(runFormatCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: "jittest-report.json",
+        output: "github-step-summary",
+        outFile: "summary.md",
+      }),
+    );
+  });
+
+  it("dispatches the triage command with label options", async () => {
+    await runCli([
+      "triage",
+      "--run-id",
+      "run-1",
+      "--label",
+      "confirmed-true-positive",
+      "--notes",
+      "real regression",
+    ]);
+
+    expect(runTriageCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        runId: "run-1",
+        label: "confirmed-true-positive",
+        notes: "real regression",
+      }),
+    );
   });
 
   it("throws on unknown commands", async () => {

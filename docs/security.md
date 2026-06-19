@@ -7,8 +7,9 @@ implications.
 
 ## What is sent to the LLM provider
 
-The currently supported provider is **OpenRouter only**. There is no default
-model; set `OPENROUTER_MODEL`, pass `--llm-model`, or provide `llm.model`
+The built-in providers are **OpenRouter** and generic
+**OpenAI-compatible** endpoints. There is no default model; set
+`OPENROUTER_MODEL` / `LLM_MODEL`, pass `--llm-model`, or provide `llm.model`
 programmatically.
 
 For each `jittest catch` run, the following data may be sent to the
@@ -19,7 +20,8 @@ provider in prompt payloads:
 - The **source of changed functions** (and a small amount of
   surrounding context) for files in the diff.
 - The **PR title and body**, if supplied via `--pr-title` and `--pr-body`.
-- The **contents of `--context-file`** files, in full.
+- The **contents of `--context-file`** files, plus auto-loaded repo guidance
+  files such as `AGENTS.md`, `CLAUDE.md`, and `CONTRIBUTING.md` when present.
 - The **generated test code** itself (sent to the judge for assessment).
 - The **failure messages and stack traces** from failing Vitest runs.
 
@@ -117,24 +119,24 @@ same retention and access controls you would to source code.
 
 ## Network egress
 
-The only `jittest`-owned API egress is outbound HTTPS to OpenRouter
-(`openrouter.ai`, currently). Git operations and package-manager installs
-may contact separate external endpoints, such as git remotes and npm/pnpm/yarn
-registries. Vitest execution itself is local unless the project's tests make
-network calls.
+The only `jittest`-owned API egress is outbound HTTPS to your configured LLM
+provider, such as OpenRouter or an OpenAI-compatible endpoint. Git operations
+and package-manager installs may contact separate external endpoints, such as
+git remotes and npm/pnpm/yarn registries. Vitest execution itself is local
+unless the project's tests make network calls.
 
 In a hermetic environment (locked-down corporate VPN, etc.) you must
-allow outbound HTTPS to OpenRouter, plus any git or package-registry endpoints
-your runner needs.
+allow outbound HTTPS to the configured LLM provider, plus any git or
+package-registry endpoints your runner needs.
 
 ## Compliance posture
 
 If your organization needs an explicit statement for compliance review:
 
 - `jittest` is an LLM-augmented test generator that sends diff context,
-  changed source code, and (optionally) PR metadata to OpenRouter and the
-  upstream model providers selected by your OpenRouter routing/model settings.
-- Data sent is governed by your OpenRouter and upstream provider agreements
+  changed source code, and optional PR/repo guidance metadata to your configured
+  LLM provider.
+- Data sent is governed by your LLM provider agreements
   and any DPA you
   have in place.
 - The `jittest` application sends no telemetry, analytics, or third-party
@@ -144,6 +146,5 @@ If your organization needs an explicit statement for compliance review:
 - Source for the CLI is available; you can audit exactly what is sent
   by reading `source/prompts/*` and `source/utils/llm-client.ts`.
 
-If your codebase is unable to legally use a hosted LLM, **do not run
-`jittest` against it**. There is no on-prem or local-model
-configuration in this codebase today.
+If your codebase is unable to legally use a hosted LLM, configure an approved
+OpenAI-compatible internal endpoint or do not run `jittest` against it.

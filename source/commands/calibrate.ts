@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import path from "node:path";
 
 import { combineAssessmentScores } from "../assessors/pipeline.js";
 import type { Assessment } from "../assessors/types.js";
@@ -7,13 +6,14 @@ import {
   type AssessorsConfig,
   assessorsConfigSchema,
   type CalibrateCommandOptions,
-  loadConfigFile,
 } from "../config.js";
 import {
   type AggregatedAssessment,
   assessmentFeedbackRecordSchema,
 } from "../runtime-schemas.js";
 import { logger } from "../utils/logger.js";
+
+import { resolveFeedbackPath } from "./feedback-path.js";
 
 interface LabeledRecord {
   readonly groundTruth: boolean;
@@ -299,26 +299,6 @@ function formatNoData(skipped: number): string {
 const writeStdout = (value: string): void => {
   process.stdout.write(`${value}\n`);
 };
-
-const DEFAULT_FEEDBACK_PATH = ".jittest/assessment-records.jsonl";
-
-// Resolve the feedback path: explicit flag wins, else the config file's
-// feedbackPath, else the default. The config file is read directly (not via
-// loadConfig) so calibrate never requires an LLM model to be configured.
-function resolveFeedbackPath(options: CalibrateCommandOptions): string {
-  if (options.feedbackPath !== undefined) {
-    return path.resolve(options.cwd, options.feedbackPath);
-  }
-
-  const fileConfig = loadConfigFile(options.cwd, options.configPath);
-  // biome-ignore lint/complexity/useLiteralKeys: index signature access
-  const fileFeedbackPath = fileConfig["feedbackPath"];
-  const fromFile =
-    typeof fileFeedbackPath === "string"
-      ? fileFeedbackPath
-      : DEFAULT_FEEDBACK_PATH;
-  return path.resolve(options.cwd, fromFile);
-}
 
 async function runCalibrateCommand(
   options: CalibrateCommandOptions,

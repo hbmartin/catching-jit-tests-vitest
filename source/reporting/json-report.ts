@@ -1,14 +1,22 @@
+import { z } from "zod";
 import type { HardeningCandidate } from "../harvest/types.js";
+import {
+  behaviorReportSchema,
+  hardeningCandidateSchema,
+  runStatsSchema,
+} from "../runtime-schemas.js";
 import { cliVersion } from "../version.js";
 import type { BehaviorReport, RunStats } from "./types.js";
 
-interface JsonReport {
-  readonly version: string;
-  readonly stats: RunStats | null;
-  readonly reports: readonly BehaviorReport[];
-  readonly hardeningCandidates: readonly HardeningCandidate[];
-  readonly statusMessage?: string;
-}
+const jsonReportSchema = z.object({
+  version: z.string(),
+  stats: runStatsSchema.nullable(),
+  reports: z.array(behaviorReportSchema),
+  hardeningCandidates: z.array(hardeningCandidateSchema).default([]),
+  statusMessage: z.string().optional(),
+});
+
+type JsonReport = z.infer<typeof jsonReportSchema>;
 
 function formatJsonReport(
   reports: readonly BehaviorReport[],
@@ -19,8 +27,8 @@ function formatJsonReport(
   const report: JsonReport = {
     version: cliVersion,
     stats,
-    reports,
-    hardeningCandidates,
+    reports: [...reports],
+    hardeningCandidates: [...hardeningCandidates],
     statusMessage,
   };
 
@@ -28,4 +36,4 @@ function formatJsonReport(
 }
 
 export type { JsonReport };
-export { formatJsonReport };
+export { formatJsonReport, jsonReportSchema };

@@ -220,6 +220,28 @@ describe("computeRiskFactors", () => {
     expect(factors.sensitivityScore).toBe(0.85);
     expect(factors.complexityScore).toBeGreaterThan(0);
   });
+
+  it("applies custom sensitivity globs", () => {
+    const diff = makeDiffContext({
+      files: [
+        makeChangedFile({
+          path: "modules/memberships/invite.ts",
+        }),
+      ],
+    });
+
+    const factors = computeRiskFactors(diff, {
+      sensitivityGlobs: [
+        {
+          label: "memberships",
+          pattern: "modules/memberships/**",
+          weight: 0.92,
+        },
+      ],
+    });
+
+    expect(factors.sensitivityScore).toBe(0.92);
+  });
 });
 
 describe("computeRiskScore", () => {
@@ -342,6 +364,43 @@ describe("computeRiskAnalysis", () => {
       );
       expect(warnSpy).toHaveBeenCalledTimes(1);
     } finally {
+      await rm(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("includes custom sensitivity rule reasons", async () => {
+    const repoRoot = await mkdtemp(join(tmpdir(), "risk-scorer-custom-"));
+    const warnSpy = vi
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+
+    try {
+      const analysis = await computeRiskAnalysis(
+        repoRoot,
+        makeDiffContext({
+          files: [
+            makeChangedFile({
+              path: "modules/memberships/invite.ts",
+            }),
+          ],
+        }),
+        {
+          sensitivityGlobs: [
+            {
+              label: "memberships",
+              pattern: "modules/memberships/**",
+              weight: 0.92,
+            },
+          ],
+        },
+      );
+
+      expect(analysis.reasons).toContain(
+        "Matches custom sensitivity rule: memberships.",
+      );
+      expect(analysis.factors.sensitivityScore).toBe(0.92);
+    } finally {
+      warnSpy.mockRestore();
       await rm(repoRoot, { recursive: true, force: true });
     }
   });

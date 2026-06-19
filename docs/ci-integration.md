@@ -1,8 +1,9 @@
 # CI integration
 
 `jittest` is designed to run inside a pull request workflow. This page
-collects the practical details — fetch depth, caching, comment posting,
-and failure modes — that the root readme's CI example glosses over.
+collects the practical details — fetch depth, caching, step summaries,
+comment posting, and failure modes — that the root readme's CI example glosses
+over.
 
 ## What CI must provide
 
@@ -45,11 +46,13 @@ and failure modes — that the root readme's CI example glosses over.
 
 4. **Permissions to comment** if you want PR comments posted:
 
-   ```yaml
-   permissions:
-     contents: read
-     pull-requests: write
-   ```
+	   ```yaml
+	   permissions:
+	     contents: read
+	     pull-requests: write
+	   ```
+
+   For a read-only artifact + step-summary workflow, `contents: read` is enough.
 
 ## Reference: GitHub Actions
 
@@ -97,60 +100,18 @@ jobs:
           OPENROUTER_MODEL: anthropic/claude-sonnet-4
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          pnpm exec jittest catch \
-            --base "origin/${{ github.base_ref }}" \
-            --head HEAD \
-            --pr-title "$PR_TITLE" \
-            --pr-body "$PR_BODY" \
-            --risk-threshold 0.25 \
-            --report-threshold 0.4 \
-            --output json \
-            > jittest-report.json
-
-          node <<'NODE'
-          const { readFileSync, writeFileSync } = require("node:fs");
-
-          const escapeHtml = (value) =>
-            String(value ?? "")
-              .replaceAll("&", "&amp;")
-              .replaceAll("<", "&lt;")
-              .replaceAll(">", "&gt;");
-
-          const report = JSON.parse(readFileSync("jittest-report.json", "utf8"));
-          const reports = report.reports ?? [];
-          const regressionLabel =
-            reports.length === 1 ? "regression" : "regressions";
-          const summary =
-            `${reports.length} potential ${regressionLabel} detected. ` +
-            "If these changes are intentional, no action is needed.";
-
-          if (reports.length === 0 && report.statusMessage === undefined) {
-            writeFileSync("jittest-comment.md", "");
-            process.exit(0);
-          }
-
-          const lines =
-            reports.length === 0
-              ? ["## JiTTest: Status", "", escapeHtml(report.statusMessage)]
-              : [
-                  "## JiTTest: Behavior Change Detection",
-                  "",
-                  summary,
-                  "",
-                  ...reports.flatMap((item, index) => [
-                    `### ${index + 1}. ${escapeHtml(item.headline)}`,
-                    "",
-                    escapeHtml(item.senseCheck)
-                      .split("\n")
-                      .map((line) => `> ${line}`)
-                      .join("\n"),
-                    "",
-                  ]),
-                ];
-
-          writeFileSync("jittest-comment.md", `${lines.join("\n")}\n`);
-          NODE
+	        run: |
+	          pnpm exec jittest catch \
+	            --base "origin/${{ github.base_ref }}" \
+	            --head HEAD \
+	            --pr-title "$PR_TITLE" \
+	            --pr-body "$PR_BODY" \
+	            --risk-threshold 0.25 \
+	            --report-threshold 0.4 \
+	            --output console \
+	            --json-file jittest-report.json \
+	            --comment-file jittest-comment.md \
+	            --summary-file "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
         if: always()
@@ -171,11 +132,43 @@ jobs:
           fi
 ```
 
-The workflow above runs `jittest` once in JSON mode, uploads that report, and
-derives lightweight PR comment Markdown from the same artifact. If you need the
-exact built-in comment formatting instead, choose `--output github-comment` and
-skip the JSON artifact, or move the JSON-to-Markdown conversion into a checked-in
-script you can test.
+The workflow above runs `jittest` once and emits three artifacts from the same
+run: console logs, a JSON report, and built-in PR-comment/step-summary Markdown.
+If you already have a saved JSON report, you can render it later with
+`jittest format jittest-report.json --output github-step-summary`.
+
+## Read-only artifact + summary mode
+
+For security-conscious manual workflows, avoid PR write permissions entirely:
+
+```yaml
+permissions:
+  contents: read
+
+steps:
+  - name: Run jittest
+    env:
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+      OPENROUTER_MODEL: anthropic/claude-sonnet-4
+    run: |
+      pnpm exec jittest catch \
+        --base "origin/${{ github.base_ref }}" \
+        --head HEAD \
+        --output console \
+        --json-file jittest-report.json \
+        --summary-file "$GITHUB_STEP_SUMMARY"
+
+  - uses: actions/upload-artifact@v4
+    if: always()
+    with:
+      name: jittest-report
+      path: |
+        jittest-report.json
+        .jittest/assessment-records.jsonl
+```
+
+This path gives reviewers a run summary and preserves the full machine-readable
+artifact without granting `pull-requests: write`.
 
 ## `concurrency` matters
 
@@ -206,7 +199,8 @@ just emits Markdown. For GitLab, Buildkite, Jenkins, etc.:
 
 1. Make sure both refs are present (`git fetch origin <base>`).
 2. Run `jittest catch --output json` and parse the JSON yourself, or choose
-   `--output github-comment` if you only need Markdown.
+   `--output github-comment` / `--output github-step-summary` if you only need
+   Markdown.
 3. Post the resulting summary wherever the team reviews diffs — merge request
    descriptions, Slack, Linear, etc.
 
@@ -225,9 +219,12 @@ just emits Markdown. For GitLab, Buildkite, Jenkins, etc.:
   `pull_request_target` with care, or run `jittest` only on PRs from the
   same repository (`if: github.event.pull_request.head.repo.full_name == github.repository`).
 - **Comment never posts.** Check `jittest-comment.md` is non-empty *and*
-  the workflow has `pull-requests: write` *and* the bot account isn't
-  rate-limited. The CLI deliberately emits empty output when there are
-  no reportable catches and no status message; that is not a bug.
+	  the workflow has `pull-requests: write` *and* the bot account isn't
+	  rate-limited. The CLI deliberately emits empty output when there are
+	  no reportable catches and no status message; that is not a bug.
+- **Exit code 3.** `--base` and `--head` resolved to the same commit. The CLI
+  exited before diff extraction, LLM calls, worktree setup, or dependency
+  installation.
 
 ## Should this block merges?
 
@@ -235,5 +232,5 @@ In our experience, no — at least not at first. The signal is high but not
 high enough to fail builds before you have triage data from a few weeks
 of runs. Start advisory (comments only), tune
 `--report-threshold` until reviewers stop complaining about noise, and
-only then consider gating merges on `reportsGenerated == 0` for high-risk
-diffs.
+only then consider gating merges with `--fail-on likely-strong` or
+`--fail-on strong-catch` for high-risk diffs.

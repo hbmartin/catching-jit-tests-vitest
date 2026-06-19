@@ -6,13 +6,34 @@ import { z } from "zod";
 import { logger } from "./utils/logger.js";
 
 const workflowSchema = z.enum(["dodgy-diff", "intent-aware", "both"]);
-const outputFormatSchema = z.enum(["github-comment", "json", "console"]);
+const outputFormatSchema = z.enum([
+  "github-comment",
+  "github-step-summary",
+  "json",
+  "console",
+]);
+const savedReportFormatSchema = outputFormatSchema.exclude(["console"]);
+const failOnVerdictSchema = z.enum([
+  "strong-catch",
+  "likely-strong",
+  "uncertain",
+  "likely-false-positive",
+  "false-positive",
+  "any-report",
+]);
+const triageLabelSchema = z.enum([
+  "unknown",
+  "confirmed-true-positive",
+  "confirmed-false-positive",
+  "intended-change",
+]);
 const defaultIncludePatterns = ["src/**/*.ts", "source/**/*.ts"];
 const defaultExcludePatterns = [
   "**/*.test.ts",
   "**/*.spec.ts",
   "**/node_modules/**",
 ];
+const defaultAutoContextFiles = ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md"];
 
 const stringListSchema = z.array(z.string().trim().min(1));
 const booleanOptionSchema = z.preprocess((value) => {
@@ -61,6 +82,14 @@ const assessorsConfigSchema = z
 
 type AssessorsConfig = z.infer<typeof assessorsConfigSchema>;
 
+const sensitivityGlobSchema = z.object({
+  label: z.string().trim().min(1),
+  pattern: z.string().trim().min(1),
+  weight: z.number().min(0).max(1),
+});
+
+type SensitivityGlob = z.infer<typeof sensitivityGlobSchema>;
+
 const jitTestConfigSchema = z.object({
   llm: z.object({
     provider: z.enum(["openrouter", "openai-compatible"]).default("openrouter"),
@@ -107,6 +136,9 @@ const jitTestConfigSchema = z.object({
   outputFormat: outputFormatSchema.default("console"),
   feedbackPath: z.string().default(".jittest/assessment-records.jsonl"),
   contextFiles: z.array(z.string()).default([]),
+  autoContext: z.boolean().default(true),
+  autoContextFiles: stringListSchema.default(defaultAutoContextFiles),
+  sensitivityGlobs: z.array(sensitivityGlobSchema).default([]),
   include: stringListSchema.default(defaultIncludePatterns),
   exclude: stringListSchema.default(defaultExcludePatterns),
 });
@@ -128,9 +160,15 @@ const catchCommandOptionsSchema = z.object({
   flakeGuardRuns: z.coerce.number().int().min(1).optional(),
   timeout: z.coerce.number().int().positive().default(30_000),
   output: outputFormatSchema.default("console"),
+  failOn: failOnVerdictSchema.optional(),
+  jsonFile: z.string().trim().min(1).optional(),
+  summaryFile: z.string().trim().min(1).optional(),
+  commentFile: z.string().trim().min(1).optional(),
   reportThreshold: z.coerce.number().min(-1).max(1).default(0),
   feedbackPath: z.string().default(".jittest/assessment-records.jsonl"),
   contextFiles: z.array(z.string()).default([]),
+  autoContextFiles: z.array(z.string().trim().min(1)).optional(),
+  noAutoContext: booleanOptionSchema.optional(),
   llmModel: z.string().trim().min(1).optional(),
   llmProvider: z.enum(["openrouter", "openai-compatible"]).optional(),
   llmBaseUrl: z.string().trim().min(1).optional(),
@@ -158,30 +196,55 @@ const calibrateCommandOptionsSchema = z.object({
 
 type CalibrateCommandOptions = z.infer<typeof calibrateCommandOptionsSchema>;
 
+const formatCommandOptionsSchema = z.object({
+  input: z.string().trim().min(1),
+  output: savedReportFormatSchema.default("github-step-summary"),
+  outFile: z.string().trim().min(1).optional(),
+  cwd: z.string().trim().min(1).default("."),
+});
+
+type FormatCommandOptions = z.infer<typeof formatCommandOptionsSchema>;
+
+const triageCommandOptionsSchema = z.object({
+  feedbackPath: z.string().trim().min(1).optional(),
+  id: z.string().trim().min(1).optional(),
+  runId: z.string().trim().min(1).optional(),
+  label: triageLabelSchema.optional(),
+  notes: z.string().optional(),
+  list: z.boolean().default(false),
+  interactive: z.boolean().default(false),
+  cwd: z.string().trim().min(1).default("."),
+  configPath: z.string().trim().min(1).optional(),
+});
+
+type TriageCommandOptions = z.infer<typeof triageCommandOptionsSchema>;
+
 const CONFIG_FILE_NAME = "jittest.config.json";
 
-function readEnv(name: string): string {
-  return process.env[name] ?? "";
+type EnvMap = Record<string, string | undefined>;
+
+function readEnv(env: EnvMap, name: string): string {
+  return env[name] ?? "";
 }
 
 // LLM_API_KEY (generic) takes precedence over OPENROUTER_API_KEY so a single
 // variable works regardless of provider; OPENROUTER_API_KEY stays supported.
-function getApiKey(): string {
-  const generic = readEnv("LLM_API_KEY");
-  return generic.length > 0 ? generic : readEnv("OPENROUTER_API_KEY");
+function getApiKey(env: EnvMap): string {
+  const generic = readEnv(env, "LLM_API_KEY");
+  return generic.length > 0 ? generic : readEnv(env, "OPENROUTER_API_KEY");
 }
 
-function getModel(): string {
-  const openrouter = readEnv("OPENROUTER_MODEL");
-  return openrouter.length > 0 ? openrouter : readEnv("LLM_MODEL");
+function getModel(env: EnvMap): string {
+  const openrouter = readEnv(env, "OPENROUTER_MODEL");
+  return openrouter.length > 0 ? openrouter : readEnv(env, "LLM_MODEL");
 }
 
-function getProvider(): string {
-  return readEnv("LLM_PROVIDER");
+function getProvider(env: EnvMap): string {
+  return readEnv(env, "LLM_PROVIDER");
 }
 
-function getBaseUrl(): string {
-  return readEnv("LLM_BASE_URL");
+function getBaseUrl(env: EnvMap): string {
+  return readEnv(env, "LLM_BASE_URL");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -358,11 +421,11 @@ function loadConfigFile(
   return discovered === undefined ? {} : readConfigFileAt(discovered);
 }
 
-function createDefaultConfig(): JiTTestConfig {
+function createDefaultConfig(env: EnvMap = process.env): JiTTestConfig {
   return jitTestConfigSchema.parse({
     llm: {
-      apiKey: getApiKey(),
-      model: getModel(),
+      apiKey: getApiKey(env),
+      model: getModel(env),
     },
   });
 }
@@ -370,6 +433,8 @@ function createDefaultConfig(): JiTTestConfig {
 interface LoadConfigOptions {
   readonly cwd?: string;
   readonly configPath?: string;
+  readonly env?: EnvMap;
+  readonly ignoreEnv?: boolean;
 }
 
 // Precedence: file config < environment < explicit overrides (CLI). Undefined
@@ -377,7 +442,12 @@ interface LoadConfigOptions {
 // values with schema defaults.
 function loadConfig(
   overrides: Record<string, unknown> = {},
-  { cwd = process.cwd(), configPath }: LoadConfigOptions = {},
+  {
+    cwd = process.cwd(),
+    configPath,
+    env = process.env,
+    ignoreEnv = false,
+  }: LoadConfigOptions = {},
 ): JiTTestConfig {
   const fileConfig = loadConfigFile(cwd, configPath);
   // biome-ignore lint/complexity/useLiteralKeys: index signature access
@@ -390,10 +460,11 @@ function loadConfig(
   );
   const { llm: _ignoredLlm, ...restOverrides } = overrides;
 
-  const envApiKey = getApiKey();
-  const envModel = getModel();
-  const envProvider = getProvider();
-  const envBaseUrl = getBaseUrl();
+  const effectiveEnv = ignoreEnv ? {} : env;
+  const envApiKey = getApiKey(effectiveEnv);
+  const envModel = getModel(effectiveEnv);
+  const envProvider = getProvider(effectiveEnv);
+  const envBaseUrl = getBaseUrl(effectiveEnv);
   // biome-ignore lint/complexity/useLiteralKeys: index signature access
   const fileApiKeyValue = fileLlm["apiKey"];
   const fileApiKey = typeof fileApiKeyValue === "string" ? fileApiKeyValue : "";
@@ -435,13 +506,22 @@ const parseCalibrateCommandOptions = (
   input: unknown,
 ): CalibrateCommandOptions => calibrateCommandOptionsSchema.parse(input);
 
+const parseFormatCommandOptions = (input: unknown): FormatCommandOptions =>
+  formatCommandOptionsSchema.parse(input);
+
+const parseTriageCommandOptions = (input: unknown): TriageCommandOptions =>
+  triageCommandOptionsSchema.parse(input);
+
 export type {
   AssessorsConfig,
   CalibrateCommandOptions,
   CatchCommandOptions,
+  FormatCommandOptions,
   JiTTestConfig,
   LoadConfigOptions,
   OutputFormat,
+  SensitivityGlob,
+  TriageCommandOptions,
   Workflow,
 };
 export {
@@ -449,13 +529,22 @@ export {
   calibrateCommandOptionsSchema,
   catchCommandOptionsSchema,
   createDefaultConfig,
+  defaultAutoContextFiles,
   defaultExcludePatterns,
   defaultIncludePatterns,
+  failOnVerdictSchema,
+  formatCommandOptionsSchema,
   jitTestConfigSchema,
   loadConfig,
   loadConfigFile,
   outputFormatSchema,
   parseCalibrateCommandOptions,
   parseCatchCommandOptions,
+  parseFormatCommandOptions,
+  parseTriageCommandOptions,
+  savedReportFormatSchema,
+  sensitivityGlobSchema,
+  triageCommandOptionsSchema,
+  triageLabelSchema,
   workflowSchema,
 };

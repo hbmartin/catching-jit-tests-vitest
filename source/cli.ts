@@ -6,9 +6,13 @@ import { parseArgs } from "node:util";
 
 import { runCalibrateCommand } from "./commands/calibrate.js";
 import { runCatchCommand } from "./commands/catch.js";
+import { runFormatCommand } from "./commands/format.js";
+import { runTriageCommand } from "./commands/triage.js";
 import {
   parseCalibrateCommandOptions,
   parseCatchCommandOptions,
+  parseFormatCommandOptions,
+  parseTriageCommandOptions,
 } from "./config.js";
 import { cliVersion } from "./version.js";
 
@@ -17,7 +21,9 @@ const helpText = `Usage
 
 Commands
   catch      Generate catching tests for the current diff
+  format     Render a saved JSON report as Markdown
   calibrate  Analyze feedback records and recommend assessor weights
+  triage     Label assessment feedback records
 
 Global options
   --help     Show help
@@ -37,10 +43,16 @@ catch options
   --include <glob>         Changed file glob to include
   --exclude <glob>         Changed file glob to exclude
   --timeout <ms>           Per-test timeout
-  --output <format>        console | json | github-comment
+  --output <format>        console | json | github-comment | github-step-summary
+  --fail-on <verdict>      Exit 2 when a report at this verdict or stronger is found
+  --json-file <path>       Also write the JSON report to this file
+  --summary-file <path>    Also write GitHub step-summary Markdown to this file
+  --comment-file <path>    Also write GitHub PR-comment Markdown to this file
   --report-threshold <n>   Minimum score to report
   --feedback-path <path>   JSONL file for assessor feedback records
   --context-file <path>    Extra local context file for intent analysis
+  --auto-context-file <p>  Optional repo guidance file to auto-load when present
+  --no-auto-context        Disable auto-loading AGENTS/CLAUDE/CONTRIBUTING docs
   --pr-title <text>        Pull request title for intent-aware analysis
   --pr-body <text>         Pull request body for intent-aware analysis
   --llm-model <model>      Model id (provider-specific)
@@ -56,6 +68,24 @@ catch options
 calibrate options
   --feedback-path <path>   JSONL feedback records to analyze
   --output <format>        console | json
+  --config <path>          Path to jittest.config.json (default: auto-discover)
+  --cwd <path>             Repository root (default: .)
+
+format options
+  jittest format <report.json> --output github-step-summary
+  --input <path>           Saved JSON report (positional path also accepted)
+  --output <format>        json | github-comment | github-step-summary
+  --out <path>             Write rendered output to this file instead of stdout
+  --cwd <path>             Repository root for relative paths (default: .)
+
+triage options
+  --feedback-path <path>   JSONL feedback records to update
+  --id <record-id>         Limit to one feedback record
+  --run-id <run-id>        Limit to one run's feedback records
+  --label <label>          unknown | confirmed-true-positive | confirmed-false-positive | intended-change
+  --notes <text>           Notes to store with the label
+  --list                   List matching feedback records
+  --interactive            Prompt for labels in a terminal
   --config <path>          Path to jittest.config.json (default: auto-discover)
   --cwd <path>             Repository root (default: .)
 `;
@@ -76,9 +106,12 @@ const printVersion = (): void => {
   writeStdout(cliVersion);
 };
 
+const stripStandaloneDoubleDash = (argv: readonly string[]): string[] =>
+  argv.filter((arg) => arg !== "--");
+
 const parseCatchOptions = (argv: readonly string[]) => {
   const parsed = parseArgs({
-    args: [...argv],
+    args: stripStandaloneDoubleDash(argv),
     options: {
       base: { type: "string" },
       head: { type: "string" },
@@ -94,9 +127,15 @@ const parseCatchOptions = (argv: readonly string[]) => {
       exclude: { type: "string", multiple: true },
       timeout: { type: "string" },
       output: { type: "string" },
+      "fail-on": { type: "string" },
+      "json-file": { type: "string" },
+      "summary-file": { type: "string" },
+      "comment-file": { type: "string" },
       "report-threshold": { type: "string" },
       "feedback-path": { type: "string" },
       "context-file": { type: "string", multiple: true },
+      "auto-context-file": { type: "string", multiple: true },
+      "no-auto-context": { type: "boolean" },
       "pr-title": { type: "string" },
       "pr-body": { type: "string" },
       "llm-model": { type: "string" },
@@ -133,9 +172,15 @@ const parseCatchOptions = (argv: readonly string[]) => {
     exclude: parsed.values.exclude,
     timeout: parsed.values.timeout,
     output: parsed.values.output,
+    failOn: parsed.values["fail-on"],
+    jsonFile: parsed.values["json-file"],
+    summaryFile: parsed.values["summary-file"],
+    commentFile: parsed.values["comment-file"],
     reportThreshold: parsed.values["report-threshold"],
     feedbackPath: parsed.values["feedback-path"],
     contextFiles: parsed.values["context-file"],
+    autoContextFiles: parsed.values["auto-context-file"],
+    noAutoContext: parsed.values["no-auto-context"],
     prTitle: parsed.values["pr-title"],
     prBody: parsed.values["pr-body"],
     llmModel: parsed.values["llm-model"],
@@ -152,7 +197,7 @@ const parseCatchOptions = (argv: readonly string[]) => {
 
 const parseCalibrateOptions = (argv: readonly string[]) => {
   const parsed = parseArgs({
-    args: [...argv],
+    args: stripStandaloneDoubleDash(argv),
     options: {
       "feedback-path": { type: "string" },
       output: { type: "string" },
@@ -171,6 +216,68 @@ const parseCalibrateOptions = (argv: readonly string[]) => {
   return parseCalibrateCommandOptions({
     feedbackPath: parsed.values["feedback-path"],
     output: parsed.values.output,
+    configPath: parsed.values.config,
+    cwd: parsed.values.cwd,
+  });
+};
+
+const parseFormatOptions = (argv: readonly string[]) => {
+  const parsed = parseArgs({
+    args: stripStandaloneDoubleDash(argv),
+    options: {
+      input: { type: "string" },
+      output: { type: "string" },
+      out: { type: "string" },
+      cwd: { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
+    allowPositionals: true,
+  });
+
+  if (parsed.values.help) {
+    printHelp();
+    return null;
+  }
+
+  return parseFormatCommandOptions({
+    input: parsed.values.input ?? parsed.positionals[0],
+    output: parsed.values.output,
+    outFile: parsed.values.out,
+    cwd: parsed.values.cwd,
+  });
+};
+
+const parseTriageOptions = (argv: readonly string[]) => {
+  const parsed = parseArgs({
+    args: stripStandaloneDoubleDash(argv),
+    options: {
+      "feedback-path": { type: "string" },
+      id: { type: "string" },
+      "run-id": { type: "string" },
+      label: { type: "string" },
+      notes: { type: "string" },
+      list: { type: "boolean" },
+      interactive: { type: "boolean" },
+      config: { type: "string" },
+      cwd: { type: "string" },
+      help: { type: "boolean", short: "h" },
+    },
+    allowPositionals: false,
+  });
+
+  if (parsed.values.help) {
+    printHelp();
+    return null;
+  }
+
+  return parseTriageCommandOptions({
+    feedbackPath: parsed.values["feedback-path"],
+    id: parsed.values.id,
+    runId: parsed.values["run-id"],
+    label: parsed.values.label,
+    notes: parsed.values.notes,
+    list: parsed.values.list,
+    interactive: parsed.values.interactive,
     configPath: parsed.values.config,
     cwd: parsed.values.cwd,
   });
@@ -201,6 +308,26 @@ const executeCommand = async (
 
     if (options !== null) {
       await runCalibrateCommand(options);
+    }
+
+    return;
+  }
+
+  if (command === "format") {
+    const options = parseFormatOptions(rest);
+
+    if (options !== null) {
+      await runFormatCommand(options);
+    }
+
+    return;
+  }
+
+  if (command === "triage") {
+    const options = parseTriageOptions(rest);
+
+    if (options !== null) {
+      await runTriageCommand(options);
     }
 
     return;

@@ -1,0 +1,141 @@
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { runTriageCommand } from "../../source/commands/triage.js";
+import { buildAssessmentFeedbackRecord } from "../../source/feedback/store.js";
+import type { AssessmentFeedbackRecord } from "../../source/runtime-schemas.js";
+
+function makeRecord(runId: string): AssessmentFeedbackRecord {
+  return buildAssessmentFeedbackRecord({
+    runId,
+    recordedAt: "2026-05-17T00:00:00.000Z",
+    baseRef: "origin/main",
+    headRef: "HEAD",
+    workflow: "both",
+    diff: {
+      rawDiff: "+return false;",
+      pr: {
+        title: "Refactor auth",
+        body: "",
+        branch: "HEAD",
+        baseSha: "base",
+        headSha: "head",
+      },
+      files: [],
+      riskScore: 0.7,
+      changedSymbols: [],
+    },
+    weakCatch: {
+      test: {
+        code: "it('keeps behavior', () => {});",
+        targetSymbol: "isAllowed",
+        testFilePath: "source/auth.jittest.test.ts",
+        behaviorDescription: "Access remains enabled",
+        workflow: "dodgy-diff",
+        generatorConfidence: 0.8,
+      },
+      parentResult: {
+        testFile: "source/auth.jittest.test.ts",
+        testName: "keeps behavior",
+        status: "passed",
+        failureMessage: "",
+        duration: 1,
+        failureAnalysis: null,
+      },
+      childResult: {
+        testFile: "source/auth.jittest.test.ts",
+        testName: "keeps behavior",
+        status: "failed",
+        failureMessage: "expected false to be true",
+        duration: 1,
+        failureAnalysis: null,
+      },
+      behaviorChange: {
+        summary: "Boolean result flipped",
+        parentBehavior: "true",
+        childBehavior: "false",
+        changeType: "boolean-flipped",
+      },
+    },
+    assessment: {
+      assessments: [],
+      combinedScore: 0.8,
+      verdict: "strong-catch",
+      shouldReport: true,
+      dismissalDifficulty: "trivial",
+    },
+  });
+}
+
+describe("runTriageCommand", () => {
+  let dir: string | null = null;
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    if (dir !== null) {
+      await rm(dir, { recursive: true, force: true });
+      dir = null;
+    }
+  });
+
+  it("labels matching records by run id", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "jittest-triage-"));
+    const feedbackPath = path.join(dir, "records.jsonl");
+    const first = makeRecord("run-1");
+    const second = makeRecord("run-2");
+    await writeFile(
+      feedbackPath,
+      `${JSON.stringify(first)}\n${JSON.stringify(second)}\n`,
+      "utf-8",
+    );
+
+    await runTriageCommand({
+      cwd: dir,
+      feedbackPath,
+      runId: "run-1",
+      label: "confirmed-true-positive",
+      notes: "real regression",
+      list: false,
+      interactive: false,
+    });
+
+    const [updatedFirst, updatedSecond] = (
+      await readFile(feedbackPath, "utf-8")
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+    expect(updatedFirst.engineerFeedback).toMatchObject({
+      label: "confirmed-true-positive",
+      notes: "real regression",
+    });
+    expect(updatedFirst.engineerFeedback.dismissedAt).toEqual(
+      expect.any(String),
+    );
+    expect(updatedSecond.engineerFeedback.label).toBe("unknown");
+  });
+
+  it("lists matching records", async () => {
+    dir = await mkdtemp(path.join(tmpdir(), "jittest-triage-"));
+    const feedbackPath = path.join(dir, "records.jsonl");
+    await writeFile(feedbackPath, `${JSON.stringify(makeRecord("run-1"))}\n`);
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    await runTriageCommand({
+      cwd: dir,
+      feedbackPath,
+      runId: "run-1",
+      list: true,
+      interactive: false,
+    });
+
+    expect(writeSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Boolean result flipped"),
+    );
+  });
+});

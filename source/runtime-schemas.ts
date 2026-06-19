@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { outputFormatSchema, workflowSchema } from "./config.js";
+import { savedReportFormatSchema, workflowSchema } from "./config.js";
 
 const testExecutionStatusSchema = z.enum(["passed", "failed", "skipped"]);
 const vitestStatusSchema = z.enum([
@@ -390,7 +390,7 @@ export const runStatsSchema = z.object({
 export type RunStats = z.infer<typeof runStatsSchema>;
 
 export const reportCommandResultSchema = z.object({
-  format: outputFormatSchema.exclude(["github-comment"]),
+  format: savedReportFormatSchema,
   reports: z.array(behaviorReportSchema),
 });
 

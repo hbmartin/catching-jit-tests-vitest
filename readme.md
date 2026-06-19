@@ -28,6 +28,7 @@ false-positive filtering.
 - [Output formats](#output-formats)
 - [Configuration](#configuration)
 - [Feedback records](#feedback-records)
+- [Triage](#triage)
 - [Calibration](#calibration)
 - [Programmatic API](#programmatic-api)
 - [Local development](#local-development)
@@ -50,7 +51,7 @@ Vitest. For every diff, it can:
 5. Run the same generated tests against both worktrees.
 6. Harvest tests that pass on the parent but fail on the child.
 7. Filter likely false positives with rule-based and LLM-based assessors.
-8. Emit console, JSON, or GitHub-comment-ready reports.
+8. Emit console, JSON, GitHub-comment-ready, or GitHub step-summary reports.
 
 The goal is not to replace your normal test suite. The goal is to find
 behavioral changes that your existing tests did not already pin down.
@@ -91,8 +92,11 @@ candidates" in JSON output because they may still be useful regression tests.
 - Optional flake guard (`--flake-guard-runs`) that drops candidates that are not
   stably green on the parent revision.
 - Console, JSON, and GitHub comment output.
+- GitHub step-summary output plus side-output files for one-pass CI artifacts.
 - Assessment feedback records plus a `jittest calibrate` command that turns
   triaged labels into recommended assessor weights.
+- A `jittest triage` command for labeling feedback records by record ID or run
+  ID.
 - TypeScript exports for lower-level pipeline pieces.
 
 ## Requirements
@@ -153,7 +157,9 @@ Usage
 
 Commands
   catch      Generate catching tests for the current diff
+  format     Render a saved JSON report as Markdown
   calibrate  Analyze feedback records and recommend assessor weights
+  triage     Label assessment feedback records
 
 Global options
   --help     Show help
@@ -173,10 +179,16 @@ catch options
   --include <glob>         Changed file glob to include
   --exclude <glob>         Changed file glob to exclude
   --timeout <ms>           Per-test timeout
-  --output <format>        console | json | github-comment
+  --output <format>        console | json | github-comment | github-step-summary
+  --fail-on <verdict>      Exit 2 when a report at this verdict or stronger is found
+  --json-file <path>       Also write the JSON report to this file
+  --summary-file <path>    Also write GitHub step-summary Markdown to this file
+  --comment-file <path>    Also write GitHub PR-comment Markdown to this file
   --report-threshold <n>   Minimum score to report
   --feedback-path <path>   JSONL file for assessor feedback records
   --context-file <path>    Extra local context file for intent analysis
+  --auto-context-file <p>  Optional repo guidance file to auto-load when present
+  --no-auto-context        Disable auto-loading AGENTS/CLAUDE/CONTRIBUTING docs
   --pr-title <text>        Pull request title for intent-aware analysis
   --pr-body <text>         Pull request body for intent-aware analysis
   --llm-model <model>      Model id (provider-specific)
@@ -192,6 +204,24 @@ catch options
 calibrate options
   --feedback-path <path>   JSONL feedback records to analyze
   --output <format>        console | json
+  --config <path>          Path to jittest.config.json (default: auto-discover)
+  --cwd <path>             Repository root (default: .)
+
+format options
+  jittest format <report.json> --output github-step-summary
+  --input <path>           Saved JSON report (positional path also accepted)
+  --output <format>        json | github-comment | github-step-summary
+  --out <path>             Write rendered output to this file instead of stdout
+  --cwd <path>             Repository root for relative paths (default: .)
+
+triage options
+  --feedback-path <path>   JSONL feedback records to update
+  --id <record-id>         Limit to one feedback record
+  --run-id <run-id>        Limit to one run's feedback records
+  --label <label>          unknown | confirmed-true-positive | confirmed-false-positive | intended-change
+  --notes <text>           Notes to store with the label
+  --list                   List matching feedback records
+  --interactive            Prompt for labels in a terminal
   --config <path>          Path to jittest.config.json (default: auto-discover)
   --cwd <path>             Repository root (default: .)
 ```
@@ -211,16 +241,31 @@ calibrate options
 | `--include` | `src/**/*.ts`, `source/**/*.ts` | May be repeated. Replaces the default include list when provided. |
 | `--exclude` | `**/*.test.ts`, `**/*.spec.ts`, `**/node_modules/**` | May be repeated. Replaces the default exclude list when provided. |
 | `--timeout` | `30000` | Timeout in milliseconds for each Vitest run. |
-| `--output` | `console` | One of `console`, `json`, or `github-comment`. |
+| `--output` | `console` | One of `console`, `json`, `github-comment`, or `github-step-summary`. |
+| `--fail-on` | none | Exit with code `2` when any reported catch has this verdict or stronger. Use `any-report` to fail on any report. |
+| `--json-file` | none | Also write the JSON report to this path. Useful when stdout is reserved for another format. |
+| `--summary-file` | none | Also write GitHub step-summary Markdown to this path, commonly `$GITHUB_STEP_SUMMARY`. |
+| `--comment-file` | none | Also write GitHub PR-comment Markdown to this path. Empty when there is no comment-worthy output. |
 | `--report-threshold` | `0` | Minimum combined assessment score required for a weak catch to be reported. Range: `-1` to `1`. |
 | `--feedback-path` | `.jittest/assessment-records.jsonl` | Where assessment feedback records are appended. |
 | `--context-file` | none | May be repeated. File contents are passed to intent analysis. |
+| `--auto-context-file` | `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md` | Optional repo guidance file to auto-load when present. May be repeated; replaces the configured default list when supplied. |
+| `--no-auto-context` | false | Disable automatic repo guidance context discovery. |
 | `--pr-title` | empty | Helps the intent-aware workflow decide what behavior was intended. |
 | `--pr-body` | empty | Helps the intent-aware workflow decide what behavior was intended. |
 | `--llm-model` | none | OpenRouter model id. If omitted, `OPENROUTER_MODEL` or `llm.model` must provide one. |
 | `--max-cost-usd` | none | Run-level dollar guardrail. Existing in-flight calls may finish and overshoot. |
 | `--max-tokens` | none | Run-level LLM token guardrail. This is separate from `llm.maxTokens`, the per-call output cap. |
 | `--cwd` | `.` | Repository root to analyze. |
+
+### Exit codes
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Command completed without a configured failing finding. This includes advisory runs with reports when `--fail-on` is not set. |
+| `1` | CLI/runtime error. |
+| `2` | `jittest catch --fail-on <verdict>` matched at least one reported catch. |
+| `3` | `jittest catch` resolved `--base` and `--head` to the same commit and exited before diff extraction or LLM calls. |
 
 ## Examples
 
@@ -280,6 +325,27 @@ Emit Markdown suitable for a PR comment:
 jittest catch --output github-comment > jittest-comment.md
 ```
 
+Emit JSON and a GitHub step summary from one run:
+
+```sh
+jittest catch \
+  --output json \
+  --summary-file "$GITHUB_STEP_SUMMARY" \
+  --json-file jittest-report.json
+```
+
+Render a saved JSON report later:
+
+```sh
+jittest format jittest-report.json --output github-step-summary --out summary.md
+```
+
+Fail a CI step when a strong enough report is found:
+
+```sh
+jittest catch --output json --fail-on likely-strong
+```
+
 Reduce cost and runtime during experiments:
 
 ```sh
@@ -294,7 +360,11 @@ jittest catch \
 
 ### 1. Diff extraction
 
-The CLI reads changed files with:
+The CLI first resolves `--base` and `--head` to commits. If both refs resolve
+to the same commit, the run exits immediately with status code `3` before diff
+extraction, LLM calls, worktree setup, or dependency installation.
+
+Otherwise, it reads changed files with:
 
 ```text
 git diff --name-only <base>...<head>
@@ -478,7 +548,7 @@ The top-level JSON shape is:
 
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.3.0",
   "stats": {
     "duration": "38s",
     "diffExtractionMs": 120,
@@ -564,6 +634,30 @@ jittest catch --output github-comment > jittest-comment.md
 If no reports meet the threshold, this formatter returns an empty string unless
 there is a status message, such as a skipped low-risk run.
 
+### GitHub step summary
+
+GitHub step-summary output is Markdown formatted for `$GITHUB_STEP_SUMMARY`:
+
+```sh
+jittest catch --output github-step-summary >> "$GITHUB_STEP_SUMMARY"
+```
+
+In CI, the more common pattern is to keep JSON on stdout or in a file and emit
+the summary as a side output:
+
+```sh
+jittest catch \
+  --output json \
+  --json-file jittest-report.json \
+  --summary-file "$GITHUB_STEP_SUMMARY"
+```
+
+The same renderer can be applied to a saved report:
+
+```sh
+jittest format jittest-report.json --output github-step-summary --out summary.md
+```
+
 ## Configuration
 
 Configuration is resolved from three layers, lowest precedence first:
@@ -609,6 +703,9 @@ Default runtime configuration:
   outputFormat: "console",
   feedbackPath: ".jittest/assessment-records.jsonl",
   contextFiles: [],
+  autoContext: true,
+  autoContextFiles: ["AGENTS.md", "CLAUDE.md", "CONTRIBUTING.md"],
+  sensitivityGlobs: [],
   include: ["src/**/*.ts", "source/**/*.ts"],
   exclude: ["**/*.test.ts", "**/*.spec.ts", "**/node_modules/**"]
 }
@@ -623,9 +720,23 @@ hand or via `jittest calibrate` (see [Calibration](#calibration)):
 ```json
 {
   "reportThreshold": 0.1,
-  "assessors": { "rubfakeWeight": 0.55, "llmWeight": 0.45 }
+  "assessors": { "rubfakeWeight": 0.55, "llmWeight": 0.45 },
+  "sensitivityGlobs": [
+    { "label": "memberships", "pattern": "modules/memberships/**", "weight": 0.95 },
+    { "label": "webhooks", "pattern": "src/webhooks/**", "weight": 0.9 }
+  ]
 }
 ```
+
+`sensitivityGlobs` lets a repository teach the risk scorer about project-specific
+sensitive paths. Matching files can raise the sensitivity component of the risk
+score and add a corresponding risk reason.
+
+By default, intent-aware analysis also auto-loads repo guidance files when they
+exist: `AGENTS.md`, `CLAUDE.md`, and `CONTRIBUTING.md`. These are optional and
+quietly skipped when absent. Use `autoContext: false` or `--no-auto-context` to
+disable this, or set `autoContextFiles` / `--auto-context-file` to choose a
+different allowlist.
 
 ### LLM response cache
 
@@ -677,6 +788,36 @@ Use a different path with:
 jittest catch --feedback-path report/jittest-assessments.jsonl
 ```
 
+## Triage
+
+`jittest triage` labels feedback records in place so the calibration loop does
+not require hand-editing JSONL.
+
+List records from a run:
+
+```sh
+jittest triage --run-id "$RUN_ID" --list
+```
+
+Label every record from a run:
+
+```sh
+jittest triage \
+  --run-id "$RUN_ID" \
+  --label confirmed-true-positive \
+  --notes "reviewed in PR 123"
+```
+
+Label a single record:
+
+```sh
+jittest triage \
+  --id fb4d2ce3b91966cd \
+  --label intended-change
+```
+
+For local terminal use, `--interactive` prompts for labels one record at a time.
+
 ## Calibration
 
 Once you have triaged some records (set their `engineerFeedback.label`), close
@@ -722,10 +863,13 @@ import {
 } from "catching-jit-tests-vitest";
 
 const cwd = process.cwd();
-const config = loadConfig({
-  workflow: "dodgy-diff",
-  testsPerFunction: 1,
-});
+const config = loadConfig(
+  {
+    workflow: "dodgy-diff",
+    testsPerFunction: 1,
+  },
+  { cwd, configPath: "jittest.config.json" },
+);
 
 const diff = await applyRiskAnalysis(
   cwd,
@@ -744,6 +888,22 @@ console.log({
   generated: generated.length,
 });
 ```
+
+`loadConfig(overrides?, options?)` accepts a second options object:
+
+```ts
+const config = loadConfig(
+  { testsPerFunction: 1 },
+  {
+    cwd: process.cwd(),
+    configPath: "jittest.config.json",
+    env: { OPENROUTER_MODEL: "anthropic/claude-sonnet-4" },
+    ignoreEnv: false,
+  },
+);
+```
+
+Use `ignoreEnv: true` or an explicit `env` map for deterministic config tests.
 
 ### Bring your own AI SDK provider
 
@@ -767,7 +927,8 @@ const llm = new LLMClient({
 Common exports include:
 
 - Configuration: `loadConfig`, `createDefaultConfig`,
-  `parseCatchCommandOptions`, `workflowSchema`, `outputFormatSchema`
+  `parseCatchCommandOptions`, `parseFormatCommandOptions`,
+  `parseTriageCommandOptions`, `workflowSchema`, `outputFormatSchema`
 - Diff analysis: `extractDiff`, `extractDiffContext`, `analyzeFileChanges`,
   `applyRiskAnalysis`, `computeRiskScore`
 - Generation: `dodgyDiffWorkflow`, `intentAwareWorkflow`,
@@ -775,7 +936,9 @@ Common exports include:
 - Execution and harvesting types: `DualExecutionResult`, `TestResult`,
   `WeakCatch`, `HardeningCandidate`
 - Assessment: `assessWeakCatch`
-- Reporting: `formatCatchResult`, `formatJsonReport`, `formatPRComment`
+- Reporting: `formatCatchResult`, `formatJsonReport`, `formatPRComment`,
+  `formatGithubStepSummary`
+- Commands: `runFormatCommand`, `runTriageCommand`
 - Runtime validation schemas from `source/runtime-schemas.ts`
 
 ## Local development
@@ -857,6 +1020,11 @@ Important root files:
 
 This example runs the built CLI in a pull request workflow and posts a PR
 comment when `jittest` produces one.
+
+For read-only workflows, use `contents: read`, write JSON with `--json-file`, and
+write the GitHub step summary with `--summary-file "$GITHUB_STEP_SUMMARY"`.
+That path does not require `pull-requests: write`; upload the JSON and feedback
+JSONL as artifacts for later triage.
 
 ```yaml
 name: jittest
@@ -972,6 +1140,13 @@ git rev-parse HEAD
 
 In CI, use `fetch-depth: 0` or explicitly fetch the base branch.
 
+### Base and head are the same commit
+
+`jittest catch` resolves both refs before diff extraction. If they resolve to
+the same commit, it exits before LLM calls or worktree setup with exit code `3`
+and a status message. In CI this usually means the base/head refs were wired
+incorrectly.
+
 ### Dependency installation fails inside worktrees
 
 The runner installs dependencies in both temporary worktrees. Make sure the
@@ -1018,8 +1193,10 @@ message. Use `--output json` if you always need a machine-readable artifact.
 ## Limitations
 
 - The CLI is currently focused on TypeScript and Vitest.
-- Only the OpenRouter provider is implemented.
-- There is no config-file loader yet; use CLI flags or programmatic overrides.
+- The built-in providers are OpenRouter and generic OpenAI-compatible endpoints;
+  other AI SDK models require programmatic integration.
+- Configuration is JSON-only today; JavaScript/TypeScript config files are not
+  loaded.
 - Generated tests may be invalid, flaky, or too specific. The assessor reduces
   this noise but cannot remove it completely.
 - Dependency installation in temporary worktrees can be slow for large

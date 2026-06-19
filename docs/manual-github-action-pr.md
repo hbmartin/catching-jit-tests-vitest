@@ -128,6 +128,42 @@ jobs:
           fi
 ```
 
+### Read-only variant
+
+If the workflow must run with only `contents: read`, skip comment posting and
+write a step summary plus artifacts:
+
+```yaml
+permissions:
+  contents: read
+
+# Replace the Run JiTTest and Post comment steps with:
+- name: Run JiTTest
+  env:
+    OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+    OPENROUTER_MODEL: anthropic/claude-sonnet-4
+  run: |
+    pnpm exec jittest catch \
+      --base "origin/${BASE_REF}" \
+      --head "$HEAD_REF" \
+      --pr-title "$PR_TITLE" \
+      --pr-body "$PR_BODY" \
+      --output console \
+      --json-file jittest-report.json \
+      --summary-file "$GITHUB_STEP_SUMMARY"
+
+- uses: actions/upload-artifact@v4
+  if: always()
+  with:
+    name: jittest-report
+    path: |
+      jittest-report.json
+      .jittest/assessment-records.jsonl
+```
+
+This mode does not need `pull-requests: write`; reviewers use the run summary
+and artifact instead of a PR comment.
+
 ## Run the workflow
 
 1. Open the repository on GitHub.

@@ -1,3 +1,5 @@
+import picomatch from "picomatch";
+import type { SensitivityGlob } from "../config.js";
 import { mapConcurrent } from "../utils/concurrency.js";
 import { logger } from "../utils/logger.js";
 import { runCommand } from "../utils/process.js";
@@ -12,6 +14,11 @@ interface RiskAnalysis {
 interface DefectHistoryResult {
   score: number;
   available: boolean;
+}
+
+interface RiskScoreOptions {
+  defectHistoryAvailable?: boolean;
+  sensitivityGlobs?: readonly SensitivityGlob[];
 }
 
 const sensitivityPatterns: ReadonlyArray<{
@@ -52,6 +59,7 @@ const sensitivityPatterns: ReadonlyArray<{
 
 const clampScore = (value: number): number => Math.max(0, Math.min(1, value));
 const gitHistoryConcurrency = 8;
+const globOptions = { dot: true } as const;
 
 const matchesSensitivityLabel = (diff: DiffContext, label: string): boolean =>
   diff.files.some((file) => {
@@ -63,7 +71,29 @@ const matchesSensitivityLabel = (diff: DiffContext, label: string): boolean =>
     );
   });
 
-const calculateSensitivityScore = (diff: DiffContext): number => {
+const customSensitivityMatches = (
+  diff: DiffContext,
+  sensitivityGlobs: readonly SensitivityGlob[] = [],
+): SensitivityGlob[] => {
+  if (sensitivityGlobs.length === 0) {
+    return [];
+  }
+
+  const matches: SensitivityGlob[] = [];
+  for (const rule of sensitivityGlobs) {
+    const matcher = picomatch(rule.pattern.replaceAll("\\", "/"), globOptions);
+    if (diff.files.some((file) => matcher(file.path.replaceAll("\\", "/")))) {
+      matches.push(rule);
+    }
+  }
+
+  return matches;
+};
+
+const calculateSensitivityScore = (
+  diff: DiffContext,
+  sensitivityGlobs: readonly SensitivityGlob[] = [],
+): number => {
   if (diff.files.length === 0) {
     return 0;
   }
@@ -95,6 +125,10 @@ const calculateSensitivityScore = (diff: DiffContext): number => {
         maxWeight = Math.max(maxWeight, weight);
       }
     }
+  }
+
+  for (const rule of customSensitivityMatches(diff, sensitivityGlobs)) {
+    maxWeight = Math.max(maxWeight, rule.weight);
   }
 
   return clampScore(maxWeight);
@@ -130,11 +164,14 @@ function computeCoverageGap(diff: DiffContext): number {
   return clampScore(uncoveredCount / diff.files.length);
 }
 
-function computeRiskFactors(diff: DiffContext): RiskFactors {
+function computeRiskFactors(
+  diff: DiffContext,
+  options: Pick<RiskScoreOptions, "sensitivityGlobs"> = {},
+): RiskFactors {
   const defectHistory = diff.riskFactors ? diff.riskFactors.defectHistory : 0;
 
   return {
-    sensitivityScore: calculateSensitivityScore(diff),
+    sensitivityScore: calculateSensitivityScore(diff, options.sensitivityGlobs),
     complexityScore: computeComplexityScore(diff),
     coverageGap: computeCoverageGap(diff),
     defectHistory,
@@ -204,9 +241,7 @@ const calculateDefectHistory = async (
 const buildRiskReasons = (
   diff: DiffContext,
   factors: RiskFactors,
-  options: {
-    defectHistoryAvailable: boolean;
-  },
+  options: RiskScoreOptions,
 ): string[] => {
   const reasons: string[] = [];
 
@@ -242,6 +277,10 @@ const buildRiskReasons = (
     reasons.push("Touches encryption, secrets, or credential handling.");
   }
 
+  for (const rule of customSensitivityMatches(diff, options.sensitivityGlobs)) {
+    reasons.push(`Matches custom sensitivity rule: ${rule.label}.`);
+  }
+
   if (factors.coverageGap >= 0.5) {
     reasons.push("A large portion of changed files do not have nearby tests.");
   }
@@ -269,11 +308,9 @@ const buildRiskReasons = (
 
 function computeRiskScore(
   diff: DiffContext,
-  options: {
-    defectHistoryAvailable?: boolean;
-  } = {},
+  options: RiskScoreOptions = {},
 ): number {
-  const factors = diff.riskFactors ?? computeRiskFactors(diff);
+  const factors = diff.riskFactors ?? computeRiskFactors(diff, options);
   const defectHistoryWeight =
     options.defectHistoryAvailable === false ? 0 : 0.15;
   const totalWeight = 0.4 + 0.25 + 0.2 + defectHistoryWeight;
@@ -294,13 +331,14 @@ function computeRiskScore(
 const computeRiskAnalysis = async (
   repoRoot: string,
   diffContext: DiffContext,
+  options: Pick<RiskScoreOptions, "sensitivityGlobs"> = {},
 ): Promise<RiskAnalysis> => {
   const defectHistory = await calculateDefectHistory(
     repoRoot,
     diffContext.files,
   );
   const factors = {
-    ...computeRiskFactors(diffContext),
+    ...computeRiskFactors(diffContext, options),
     defectHistory: defectHistory.score,
   };
 
@@ -312,11 +350,13 @@ const computeRiskAnalysis = async (
       },
       {
         defectHistoryAvailable: defectHistory.available,
+        sensitivityGlobs: options.sensitivityGlobs,
       },
     ),
     factors,
     reasons: buildRiskReasons(diffContext, factors, {
       defectHistoryAvailable: defectHistory.available,
+      sensitivityGlobs: options.sensitivityGlobs,
     }),
   };
 };
@@ -324,8 +364,13 @@ const computeRiskAnalysis = async (
 const applyRiskAnalysis = async (
   repoRoot: string,
   diffContext: DiffContext,
+  options: Pick<RiskScoreOptions, "sensitivityGlobs"> = {},
 ): Promise<DiffContext> => {
-  const riskAnalysis = await computeRiskAnalysis(repoRoot, diffContext);
+  const riskAnalysis = await computeRiskAnalysis(
+    repoRoot,
+    diffContext,
+    options,
+  );
 
   return {
     ...diffContext,

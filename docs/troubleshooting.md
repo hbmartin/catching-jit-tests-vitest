@@ -85,7 +85,8 @@ Expect a ~60% drop in cost.
 Confirm in order:
 
 1. The workflow has `permissions: pull-requests: write`.
-2. `--output github-comment` is used (not `console`).
+2. `--output github-comment` is used, or `--comment-file jittest-comment.md`
+   is set when using another stdout format.
 3. `jittest-comment.md` is non-empty *before* the post step. The CLI
    intentionally emits empty output when there are no reportable
    catches.
@@ -93,6 +94,9 @@ Confirm in order:
 
 Add a `cat jittest-comment.md` step before `gh pr comment` if you
 need to debug what's actually being produced.
+
+For read-only workflows, skip comments and use
+`--summary-file "$GITHUB_STEP_SUMMARY"` plus `--json-file jittest-report.json`.
 
 ## "Worktree setup fails"
 
@@ -104,6 +108,8 @@ Common causes:
 
 - Both refs need to exist locally. Re-fetch the base branch before
   running.
+- If the CLI exits with code `3`, both refs resolved to the same commit.
+  Check the workflow's base/head wiring; no LLM calls or worktrees were created.
 - The base ref must be valid syntax. `origin/main` is valid;
   `origin\main` is not.
 - `/tmp` (or the OS temp dir) is out of space. Worktrees can be
