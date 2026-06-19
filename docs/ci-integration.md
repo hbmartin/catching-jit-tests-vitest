@@ -30,13 +30,13 @@ over.
 2. **A working package manager.** The runner installs dependencies inside
    both temporary worktrees, so the manager indicated by
    `package.json#packageManager` (or the detected lockfile) must be
-   available on `PATH`. This project pins pnpm to `11.1.3`; in GitHub
+   available on `PATH`. This project pins pnpm to `11.8.0`; in GitHub
    Actions, install that exact version before dependency installation:
 
    ```yaml
    - uses: pnpm/action-setup@v4
      with:
-       version: 11.1.3
+       version: 11.8.0
    ```
 
 3. **`OPENROUTER_API_KEY` as a secret.** Never hard-code it in workflow
@@ -85,7 +85,7 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 11.1.3
+          version: 11.8.0
 
       - uses: actions/setup-node@v4
         with:

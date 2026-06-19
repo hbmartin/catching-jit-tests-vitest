@@ -2,7 +2,7 @@
 import { realpathSync } from "node:fs";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { parseArgs } from "node:util";
+import { type ParseArgsConfig, parseArgs } from "node:util";
 
 import { runCalibrateCommand } from "./commands/calibrate.js";
 import { runCatchCommand } from "./commands/catch.js";
@@ -109,10 +109,54 @@ const printVersion = (): void => {
 const stripStandaloneDoubleDash = (argv: readonly string[]): string[] =>
   argv.filter((arg) => arg !== "--");
 
-const parseCatchOptions = (argv: readonly string[]) => {
+// parseArgs only infers per-key value types from a literal options object, so a
+// generic wrapper loses them. ParsedValues recovers that mapping from the
+// caller's options type: boolean flags -> boolean, repeatable string flags ->
+// string[], and plain string flags -> string.
+type ParsedOptionValue<C> = C extends { type: "boolean" }
+  ? boolean
+  : C extends { multiple: true }
+    ? string[]
+    : string;
+
+type ParsedValues<O> = { [K in keyof O]?: ParsedOptionValue<O[K]> };
+
+// Shared scaffolding for every `parseXOptions`: strip the standalone `--`, run
+// parseArgs, and short-circuit to null when --help/-h is requested. The result
+// is re-typed through ParsedValues because parseArgs cannot infer values from a
+// generic options argument; that assertion is the single boundary where the
+// loss is repaired.
+const parseCommandArgs = <
+  const O extends NonNullable<ParseArgsConfig["options"]>,
+>(
+  argv: readonly string[],
+  options: O,
+  allowPositionals: boolean,
+): {
+  readonly values: ParsedValues<O>;
+  readonly positionals: readonly string[];
+} | null => {
   const parsed = parseArgs({
     args: stripStandaloneDoubleDash(argv),
-    options: {
+    options,
+    allowPositionals,
+  });
+
+  if ((parsed.values as { help?: boolean }).help) {
+    printHelp();
+    return null;
+  }
+
+  return parsed as unknown as {
+    values: ParsedValues<O>;
+    positionals: readonly string[];
+  };
+};
+
+const parseCatchOptions = (argv: readonly string[]) => {
+  const parsed = parseCommandArgs(
+    argv,
+    {
       base: { type: "string" },
       head: { type: "string" },
       workflow: { type: "string" },
@@ -149,11 +193,10 @@ const parseCatchOptions = (argv: readonly string[]) => {
       "cache-dir": { type: "string" },
       help: { type: "boolean", short: "h" },
     },
-    allowPositionals: false,
-  });
+    false,
+  );
 
-  if (parsed.values.help) {
-    printHelp();
+  if (parsed === null) {
     return null;
   }
 
@@ -196,20 +239,19 @@ const parseCatchOptions = (argv: readonly string[]) => {
 };
 
 const parseCalibrateOptions = (argv: readonly string[]) => {
-  const parsed = parseArgs({
-    args: stripStandaloneDoubleDash(argv),
-    options: {
+  const parsed = parseCommandArgs(
+    argv,
+    {
       "feedback-path": { type: "string" },
       output: { type: "string" },
       config: { type: "string" },
       cwd: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
-    allowPositionals: false,
-  });
+    false,
+  );
 
-  if (parsed.values.help) {
-    printHelp();
+  if (parsed === null) {
     return null;
   }
 
@@ -222,20 +264,19 @@ const parseCalibrateOptions = (argv: readonly string[]) => {
 };
 
 const parseFormatOptions = (argv: readonly string[]) => {
-  const parsed = parseArgs({
-    args: stripStandaloneDoubleDash(argv),
-    options: {
+  const parsed = parseCommandArgs(
+    argv,
+    {
       input: { type: "string" },
       output: { type: "string" },
       out: { type: "string" },
       cwd: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
-    allowPositionals: true,
-  });
+    true,
+  );
 
-  if (parsed.values.help) {
-    printHelp();
+  if (parsed === null) {
     return null;
   }
 
@@ -248,9 +289,9 @@ const parseFormatOptions = (argv: readonly string[]) => {
 };
 
 const parseTriageOptions = (argv: readonly string[]) => {
-  const parsed = parseArgs({
-    args: stripStandaloneDoubleDash(argv),
-    options: {
+  const parsed = parseCommandArgs(
+    argv,
+    {
       "feedback-path": { type: "string" },
       id: { type: "string" },
       "run-id": { type: "string" },
@@ -262,11 +303,10 @@ const parseTriageOptions = (argv: readonly string[]) => {
       cwd: { type: "string" },
       help: { type: "boolean", short: "h" },
     },
-    allowPositionals: false,
-  });
+    false,
+  );
 
-  if (parsed.values.help) {
-    printHelp();
+  if (parsed === null) {
     return null;
   }
 

@@ -11,6 +11,7 @@ import {
 import { resolveFeedbackPath } from "./feedback-path.js";
 
 type TriageLabel = NonNullable<TriageCommandOptions["label"]>;
+type TriagePromptResult = TriageLabel | "quit" | null;
 
 interface FeedbackLine {
   readonly raw: string;
@@ -139,12 +140,12 @@ async function writeFeedbackLines(
 async function promptForLabel(
   rl: Interface,
   record: AssessmentFeedbackRecord,
-): Promise<TriageLabel | null> {
+): Promise<TriagePromptResult> {
   writeStdout("");
   writeStdout(`${record.id} ${record.assessment.verdict}`);
   writeStdout(record.weakCatch.behaviorChange.summary);
   const answer = await rl.question(
-    "Label: [t] true positive, [f] false positive, [i] intended, [u] unknown, [s] skip > ",
+    "Label: [t] true positive, [f] false positive, [i] intended, [u] unknown, [s] skip, [q] quit > ",
   );
   const normalized = answer.trim().toLowerCase();
   if (normalized === "t") {
@@ -158,6 +159,9 @@ async function promptForLabel(
   }
   if (normalized === "u") {
     return "unknown";
+  }
+  if (normalized === "q" || normalized === "quit") {
+    return "quit";
   }
   return null;
 }
@@ -181,6 +185,9 @@ async function applyInteractiveLabels(
   try {
     for (const record of records) {
       const label = await promptForLabel(rl, record);
+      if (label === "quit") {
+        break;
+      }
       if (label !== null) {
         for (const line of lines) {
           if (line.record?.id === record.id) {
@@ -246,6 +253,7 @@ export {
   formatRecordList,
   labelChoices,
   loadFeedbackLines,
+  promptForLabel,
   runTriageCommand,
   selectedRecords,
 };

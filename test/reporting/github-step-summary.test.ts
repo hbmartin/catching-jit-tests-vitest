@@ -5,7 +5,7 @@ import type { BehaviorReport, RunStats } from "../../source/reporting/types.js";
 
 const report: BehaviorReport = {
   headline: "Boolean result flipped | with pipe",
-  senseCheck: "This changed\nacross revisions.",
+  senseCheck: "This changed\r\nacross revisions.\rStill changed.",
   details: {
     behaviorChange: {
       summary: "Boolean result flipped",
@@ -81,7 +81,9 @@ describe("formatGithubStepSummary", () => {
     expect(result).toContain("## JiTTest");
     expect(result).toContain("| # | Verdict | Summary | Sense check |");
     expect(result).toContain("Boolean result flipped \\| with pipe");
-    expect(result).toContain("This changed<br>across revisions.");
+    expect(result).toContain(
+      "This changed<br>across revisions.<br>Still changed.",
+    );
   });
 
   it("includes a status when there are no reports", () => {

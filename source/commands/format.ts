@@ -22,6 +22,8 @@ async function loadJsonReport(
 
 function renderReport(report: JsonReport, format: OutputFormat): string {
   if (format === "json") {
+    // Preserve the report's saved version and fields verbatim; unlike `catch`,
+    // re-formatting must not re-stamp the current cliVersion.
     return JSON.stringify(report, null, 2);
   }
 

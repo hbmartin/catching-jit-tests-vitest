@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { runTriageCommand } from "../../source/commands/triage.js";
+import {
+  promptForLabel,
+  runTriageCommand,
+} from "../../source/commands/triage.js";
 import { buildAssessmentFeedbackRecord } from "../../source/feedback/store.js";
 import type { AssessmentFeedbackRecord } from "../../source/runtime-schemas.js";
 
@@ -166,6 +169,24 @@ describe("runTriageCommand", () => {
       interactive: false,
     });
 
+    expect(writeSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Boolean result flipped"),
+    );
+  });
+
+  it("allows interactive triage to quit early", async () => {
+    const question = vi.fn(async () => "q");
+    const writeSpy = vi
+      .spyOn(process.stdout, "write")
+      .mockImplementation(() => true);
+
+    const result = await promptForLabel(
+      { question } as unknown as Parameters<typeof promptForLabel>[0],
+      makeRecord("run-1"),
+    );
+
+    expect(result).toBe("quit");
+    expect(question).toHaveBeenCalledWith(expect.stringContaining("[q] quit"));
     expect(writeSpy).toHaveBeenCalledWith(
       expect.stringContaining("Boolean result flipped"),
     );
