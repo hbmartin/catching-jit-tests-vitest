@@ -90,6 +90,25 @@ const customSensitivityMatches = (
   return matches;
 };
 
+const calculateBuiltInSensitivityWeight = (file: ChangedFile): number => {
+  let maxWeight = Math.max(
+    file.touchesPayments ? 0.95 : 0,
+    file.touchesAuth ? 0.9 : 0,
+    file.touchesAccessControl ? 0.85 : 0,
+    file.touchesDataModel ? 0.7 : 0,
+  );
+  const fileDiff = file.hunks.map((hunk) => hunk.content).join("\n");
+  const combined = `${file.path}\n${fileDiff}`;
+
+  for (const { pattern, weight } of sensitivityPatterns) {
+    if (pattern.test(combined)) {
+      maxWeight = Math.max(maxWeight, weight);
+    }
+  }
+
+  return maxWeight;
+};
+
 const calculateSensitivityScore = (
   diff: DiffContext,
   sensitivityGlobs: readonly SensitivityGlob[] = [],
@@ -101,30 +120,7 @@ const calculateSensitivityScore = (
   let maxWeight = 0;
 
   for (const file of diff.files) {
-    if (file.touchesPayments) {
-      maxWeight = Math.max(maxWeight, 0.95);
-    }
-
-    if (file.touchesAuth) {
-      maxWeight = Math.max(maxWeight, 0.9);
-    }
-
-    if (file.touchesAccessControl) {
-      maxWeight = Math.max(maxWeight, 0.85);
-    }
-
-    if (file.touchesDataModel) {
-      maxWeight = Math.max(maxWeight, 0.7);
-    }
-
-    const fileDiff = file.hunks.map((hunk) => hunk.content).join("\n");
-    const combined = `${file.path}\n${fileDiff}`;
-
-    for (const { pattern, weight } of sensitivityPatterns) {
-      if (pattern.test(combined)) {
-        maxWeight = Math.max(maxWeight, weight);
-      }
-    }
+    maxWeight = Math.max(maxWeight, calculateBuiltInSensitivityWeight(file));
   }
 
   for (const rule of customSensitivityMatches(diff, sensitivityGlobs)) {

@@ -4,11 +4,7 @@ import path from "node:path";
 import type { FormatCommandOptions, OutputFormat } from "../config.js";
 import { formatPRComment } from "../reporting/github-comment.js";
 import { formatGithubStepSummary } from "../reporting/github-step-summary.js";
-import {
-  formatJsonReport,
-  type JsonReport,
-  jsonReportSchema,
-} from "../reporting/json-report.js";
+import { type JsonReport, jsonReportSchema } from "../reporting/json-report.js";
 
 import { writeOutputFile } from "./report-utils.js";
 
@@ -26,12 +22,7 @@ async function loadJsonReport(
 
 function renderReport(report: JsonReport, format: OutputFormat): string {
   if (format === "json") {
-    return formatJsonReport(
-      report.reports,
-      report.stats,
-      report.statusMessage,
-      report.hardeningCandidates,
-    );
+    return JSON.stringify(report, null, 2);
   }
 
   if (format === "github-comment") {

@@ -81,6 +81,18 @@ describe("renderReport", () => {
     );
   });
 
+  it("preserves saved JSON report metadata", () => {
+    const savedReport = {
+      ...report,
+      version: "0.1.0",
+    };
+
+    expect(JSON.parse(renderReport(savedReport, "json"))).toMatchObject({
+      version: "0.1.0",
+      statusMessage: "Skipped.",
+    });
+  });
+
   it("renders GitHub comments", () => {
     expect(renderReport(report, "github-comment")).toContain(
       "## JiTTest: Status",

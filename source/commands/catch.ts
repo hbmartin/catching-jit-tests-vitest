@@ -236,7 +236,7 @@ const loadDiffWithRisk = async (
 }> => {
   logger.info("Extracting diff context...");
   const diffStart = Date.now();
-  const diffContext = await extractDiffContext({
+  const extractedDiffContext = await extractDiffContext({
     baseRef: revisions.baseSha,
     headRef: revisions.headSha,
     cwd: options.cwd,
@@ -245,6 +245,15 @@ const loadDiffWithRisk = async (
     include: config.include,
     exclude: config.exclude,
   });
+  const diffContext: DiffContext = {
+    ...extractedDiffContext,
+    pr: {
+      ...extractedDiffContext.pr,
+      branch: options.head,
+      baseSha: revisions.baseSha,
+      headSha: revisions.headSha,
+    },
+  };
   const additionalContext = await loadIntentContext(
     options.cwd,
     config.contextFiles,

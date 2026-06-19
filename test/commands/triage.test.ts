@@ -118,16 +118,17 @@ describe("runTriageCommand", () => {
     expect(updatedSecond.engineerFeedback.label).toBe("unknown");
   });
 
-  it("preserves the original bytes of records it does not relabel", async () => {
+  it("preserves unrelabeled records verbatim but drops blank lines", async () => {
     dir = await mkdtemp(path.join(tmpdir(), "jittest-triage-"));
     const feedbackPath = path.join(dir, "records.jsonl");
-    // A record with an extra field the schema does not model, plus a blank line.
+    // A record with an extra field the schema does not model.
     const untouched = JSON.stringify({
       ...makeRecord("run-2"),
       extraField: "must-survive",
     });
     const target = JSON.stringify(makeRecord("run-1"));
-    await writeFile(feedbackPath, `${target}\n${untouched}\n`, "utf-8");
+    // Blank line between the records: it is filtered on load, not preserved.
+    await writeFile(feedbackPath, `${target}\n\n${untouched}\n`, "utf-8");
 
     await runTriageCommand({
       cwd: dir,
@@ -138,9 +139,12 @@ describe("runTriageCommand", () => {
       interactive: false,
     });
 
-    const [, secondLine] = (await readFile(feedbackPath, "utf-8"))
+    const outputLines = (await readFile(feedbackPath, "utf-8"))
       .trim()
       .split("\n");
+    // Only the two records remain; the blank line was dropped on load.
+    expect(outputLines).toHaveLength(2);
+    const [, secondLine] = outputLines;
     // The non-matched line is rewritten verbatim, including the unknown field.
     expect(secondLine).toBe(untouched);
     expect(JSON.parse(secondLine).extraField).toBe("must-survive");

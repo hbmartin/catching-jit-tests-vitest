@@ -351,6 +351,35 @@ describe("createCatchCommandResult", () => {
     );
   });
 
+  it("preserves the requested head ref in diff metadata after SHA extraction", async () => {
+    const mocks = mockCatchDependencies(0.2);
+    const { createCatchCommandResult } = await import(
+      "../../source/commands/catch.js"
+    );
+
+    await createCatchCommandResult(
+      makeOptions({ head: "feature/auth", riskThreshold: 0.5 }),
+    );
+
+    expect(mocks.extractDiffContextMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseRef: "base-sha",
+        headRef: "head-sha",
+      }),
+    );
+    expect(mocks.applyRiskAnalysisMock).toHaveBeenCalledWith(
+      mockRepoDir,
+      expect.objectContaining({
+        pr: expect.objectContaining({
+          branch: "feature/auth",
+          baseSha: "base-sha",
+          headSha: "head-sha",
+        }),
+      }),
+      expect.objectContaining({ sensitivityGlobs: [] }),
+    );
+  });
+
   it("fast-exits when base and head resolve to the same commit", async () => {
     const mocks = mockCatchDependencies(0.9, {
       baseSha: "same-sha",
