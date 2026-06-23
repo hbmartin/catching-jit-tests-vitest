@@ -111,12 +111,15 @@ const stripStandaloneDoubleDash = (argv: readonly string[]): string[] =>
 
 // parseArgs only infers per-key value types from a literal options object, so a
 // generic wrapper loses them. ParsedValues recovers that mapping from the
-// caller's options type: boolean flags -> boolean, repeatable string flags ->
-// string[], and plain string flags -> string.
-type ParsedOptionValue<C> = C extends { type: "boolean" }
-  ? boolean
-  : C extends { multiple: true }
-    ? string[]
+// caller's options type. The `multiple` check comes first so a repeatable flag
+// always yields an array, including the `multiple: true` + boolean case
+// (boolean[]); non-repeatable flags then resolve to boolean or string by type.
+type ParsedOptionValue<C> = C extends { multiple: true }
+  ? C extends { type: "boolean" }
+    ? boolean[]
+    : string[]
+  : C extends { type: "boolean" }
+    ? boolean
     : string;
 
 type ParsedValues<O> = { [K in keyof O]?: ParsedOptionValue<O[K]> };
@@ -142,6 +145,9 @@ const parseCommandArgs = <
     allowPositionals,
   });
 
+  // Every command declares a `help` boolean, but that is a soft convention
+  // rather than something the generic signature can enforce; the optional cast
+  // keeps this safe (absent -> undefined -> falsy) if a caller ever omits it.
   if ((parsed.values as { help?: boolean }).help) {
     printHelp();
     return null;

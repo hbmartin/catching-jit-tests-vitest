@@ -281,6 +281,34 @@ describe("runCli", () => {
     writeSpy.mockRestore();
   });
 
+  it("prints format help without dispatching the command", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await runCli(["format", "--help"]);
+
+    expect(writeSpy).toHaveBeenCalled();
+    expect(runFormatCommandMock).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
+  it("prefers the --input flag over the positional argument", async () => {
+    await runCli(["format", "positional.json", "--input", "flag.json"]);
+
+    expect(runFormatCommandMock).toHaveBeenCalledWith(
+      expect.objectContaining({ input: "flag.json" }),
+    );
+  });
+
+  it("prints triage help without dispatching the command", async () => {
+    const writeSpy = vi.spyOn(process.stdout, "write").mockReturnValue(true);
+
+    await runCli(["triage", "--help"]);
+
+    expect(writeSpy).toHaveBeenCalled();
+    expect(runTriageCommandMock).not.toHaveBeenCalled();
+    writeSpy.mockRestore();
+  });
+
   it("dispatches the format command with positional input", async () => {
     await runCli([
       "format",
@@ -359,6 +387,37 @@ describe("isDirectExecution", () => {
     } finally {
       process.argv = originalArgv;
       rmSync(tempDir, { force: true, recursive: true });
+    }
+  });
+
+  it("returns false when the process has no entry path", () => {
+    const originalArgv = process.argv;
+
+    try {
+      process.argv = [process.execPath];
+      expect(isDirectExecution(import.meta.url)).toBe(false);
+    } finally {
+      process.argv = originalArgv;
+    }
+  });
+
+  it("falls back to URL comparison when realpath cannot resolve", () => {
+    const originalArgv = process.argv;
+    // A path that does not exist makes realpathSync throw, exercising the
+    // catch branch that compares file URLs directly.
+    const missingEntry = path.join(testTempRoot, "missing-entry.js");
+
+    try {
+      process.argv = [process.execPath, missingEntry];
+      const missingUrl = pathToFileURL(missingEntry).href;
+      const otherUrl = pathToFileURL(
+        path.join(testTempRoot, "other-entry.js"),
+      ).href;
+
+      expect(isDirectExecution(missingUrl)).toBe(true);
+      expect(isDirectExecution(otherUrl)).toBe(false);
+    } finally {
+      process.argv = originalArgv;
     }
   });
 });
